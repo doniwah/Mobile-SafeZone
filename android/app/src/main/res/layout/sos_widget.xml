@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/sos_widget_background"
+    android:padding="16dp"
+    android:gravity="center">
+
+    <!-- SOS Button Area -->
+    <FrameLayout
+        android:id="@+id/btn_sos"
+        android:layout_width="140dp"
+        android:layout_height="140dp"
+        android:background="@drawable/sos_button_outer"
+        android:clickable="true"
+        android:focusable="true">
+
+        <FrameLayout
+            android:layout_width="110dp"
+            android:layout_height="110dp"
+            android:layout_gravity="center"
+            android:background="@drawable/sos_button_inner">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="SoS"
+                android:textColor="#FFFFFF"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+        </FrameLayout>
+    </FrameLayout>
+
+    <!-- Description Text -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Tekan tombol darurat dan\nbantuan akan segera datang"
+        android:textColor="#4A5568"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:gravity="center" />
+</LinearLayout>
