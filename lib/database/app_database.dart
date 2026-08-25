@@ -60,4 +60,21 @@ class AppDatabase {
       category: 'Lalu Lintas',
     ),
   ];
+
+  static final List<Map<String, dynamic>> redZones = [
+    {
+      'id': '1',
+      'name': 'Rawan Begal - Jl. Kalimantan',
+      'latitude': -8.1725,
+      'longitude': 113.6983,
+      'radius': 300.0,
+    },
+    {
+      'id': '2',
+      'name': 'Kawasan Kriminalitas Tinggi - Alun Alun',
+      'latitude': -8.1331,
+      'longitude': 113.2224,
+      'radius': 500.0,
+    },
+  ];
 }

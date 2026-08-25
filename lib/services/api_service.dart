@@ -216,11 +216,29 @@ class ApiService {
         'alamat_terdeteksi': detectedAddress ?? 'Deteksi Koordinat GPS',
         'catatan': message ?? 'SOS dipicu dari aplikasi mobile',
       });
-      if (response.statusCode == 201) {
+      if (response.statusCode == 201 || response.statusCode == 200) {
         return jsonDecode(response.body);
       }
     } catch (_) {}
     return null;
+  }
+
+  static Future<bool> submitSosWithEvent(dynamic event) async {
+    try {
+      final response = await postRequest('/sos', {
+        'sos_id': event.sosId,
+        'latitude': event.latitude,
+        'longitude': event.longitude,
+        'alamat_terdeteksi': event.alamatTerdeteksi ?? 'Deteksi Koordinat GPS',
+        'catatan': event.catatan,
+        'created_at': event.createdAt,
+      });
+      // 200 or 201 indicates success (including idempotent successful retries)
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        return true;
+      }
+    } catch (_) {}
+    return false;
   }
 
   static Future<List<CctvData>> fetchCctvs() async {

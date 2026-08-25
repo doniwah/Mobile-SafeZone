@@ -2,8 +2,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../models/sos_signal.dart';
+import '../../models/sos_event.dart';
 import '../../database/app_database.dart';
 import '../../services/api_service.dart';
+import '../../services/connectivity_service.dart';
+import '../../services/emergency_communication_manager.dart';
 import 'sos_settings_view.dart';
 import 'emergency_map_view.dart';
 
@@ -70,19 +73,19 @@ class _SosViewState extends State<SosView> with SingleTickerProviderStateMixin {
 
     serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      return {'latitude': -7.7956, 'longitude': 110.3695};
+      return {'latitude': -7.7956, 'longitude': 110.3695, 'accuracy': 0.0};
     }
 
     permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        return {'latitude': -7.7956, 'longitude': 110.3695};
+        return {'latitude': -7.7956, 'longitude': 110.3695, 'accuracy': 0.0};
       }
     }
     
     if (permission == LocationPermission.deniedForever) {
-      return {'latitude': -7.7956, 'longitude': 110.3695};
+      return {'latitude': -7.7956, 'longitude': 110.3695, 'accuracy': 0.0};
     } 
 
     try {
@@ -90,9 +93,9 @@ class _SosViewState extends State<SosView> with SingleTickerProviderStateMixin {
         desiredAccuracy: LocationAccuracy.high,
         timeLimit: const Duration(seconds: 5),
       );
-      return {'latitude': position.latitude, 'longitude': position.longitude};
+      return {'latitude': position.latitude, 'longitude': position.longitude, 'accuracy': position.accuracy};
     } catch (_) {
-      return {'latitude': -7.7956, 'longitude': 110.3695};
+      return {'latitude': -7.7956, 'longitude': 110.3695, 'accuracy': 0.0};
     }
   }
 
@@ -102,7 +105,10 @@ class _SosViewState extends State<SosView> with SingleTickerProviderStateMixin {
       _countdown = 5;
     });
 
+    // PARALLEL OPERATIONS: Acquire GPS and Check Connectivity simultaneously
     final locationFuture = _getCurrentLocation();
+    final reachabilityFuture = ConnectivityService.checkBackendReachability();
+    final networkTypeFuture = ConnectivityService.getNetworkType();
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       if (!mounted) return;
@@ -116,33 +122,46 @@ class _SosViewState extends State<SosView> with SingleTickerProviderStateMixin {
           _isTriggered = false;
         });
 
+        // Countdown finished. Wait for parallel operations to complete.
+        // If GPS is not done, it will wait here (up to 5s internal limit).
+        // If GPS failed, it returns fallback location.
         final loc = await locationFuture;
+        final reachability = await reachabilityFuture;
+        final networkType = await networkTypeFuture;
+
         final double lat = loc['latitude']!;
         final double lng = loc['longitude']!;
+        final double accuracy = loc['accuracy'] ?? 0.0;
 
         final isYogya = (lat >= -8.1 && lat <= -7.5 && lng >= 110.0 && lng <= 110.6);
         final String address = isYogya ? 'Yogyakarta, Indonesia' : 'Lumajang, Jawa Timur';
 
-        final responseData = await ApiService.submitSos(
+        final manager = EmergencyCommunicationManager();
+        final sosEvent = manager.createLocalSosEvent(
           latitude: lat,
           longitude: lng,
-          detectedAddress: address,
-          message: AppDatabase.sosMessageTemplate,
+          accuracy: accuracy,
+          alamatTerdeteksi: address,
+          catatan: AppDatabase.sosMessageTemplate,
         );
+
+        // Emergency Router: Decide best channel and save locally FIRST
+        await manager.sendEmergency(sosEvent, reachability, networkType);
 
         AppDatabase.sosHistory.insert(
           0,
           SosSignal(
             time: DateTime.now().toString().substring(0, 19),
             location: address,
-            status: 'Sinyal Terkirim',
+            status: sosEvent.status == SosStatus.synced ? 'Sinyal Terkirim' : 'Menunggu Koneksi',
           ),
         );
 
         if (mounted) {
           Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (context) => EmergencyMapView(sosData: responseData),
+              // Using existing API response format or map format for UI
+              builder: (context) => EmergencyMapView(sosData: {'success': true, 'message': 'SOS Event Created'}),
             ),
           );
         }

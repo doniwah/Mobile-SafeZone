@@ -1,11 +1,19 @@
 import 'package:flutter/material.dart';
 import 'services/api_service.dart';
+import 'services/emergency_sync_manager.dart';
+import 'services/notification_service.dart';
+import 'services/geofence_service.dart';
 import 'views/home/home_view.dart';
 import 'views/onboarding/onboarding_view.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ApiService.init();
+  EmergencySyncManager().initialize();
+  
+  await NotificationService().initialize();
+  GeofenceService().initialize();
+  
   runApp(const MyApp());
 }
 
