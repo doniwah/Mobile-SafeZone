@@ -135,12 +135,13 @@ class _StreetMapsViewState extends State<StreetMapsView> {
                   ),
                   if (_heatmapEnabled) ...[
                     PolygonLayer(
-                      polygons: _districts.map<Polygon>((district) {
+                      polygons: _districts.map((district) {
                         return Polygon(
                           points: district.polygonPoints,
                           color: district.color.withOpacity(0.55),
                           borderColor: Colors.white.withOpacity(0.75),
                           borderStrokeWidth: 1.5,
+                          isFilled: true,
                         );
                       }).toList(),
                     ),

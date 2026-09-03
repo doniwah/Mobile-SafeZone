@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../database/app_database.dart';
-import '../../models/news_data.dart';
 import '../../services/api_service.dart';
 import 'news_detail_view.dart';
 
