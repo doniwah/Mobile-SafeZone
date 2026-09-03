@@ -16,6 +16,12 @@ class GeofenceService {
   List<RedZone> _redZones = [];
   final Set<String> _zonesInside = {}; // Track zones currently inside to avoid spamming notifications
 
+  final _geofenceStreamController = StreamController<String>.broadcast();
+  Stream<String> get onGeofenceAlert => _geofenceStreamController.stream;
+
+  List<RedZone> get redZones => List.unmodifiable(_redZones);
+  Set<String> get zonesInside => Set.unmodifiable(_zonesInside);
+
   Future<void> initialize() async {
     await _fetchRedZones();
     _startLocationTracking();
@@ -57,11 +63,11 @@ class GeofenceService {
     });
   }
 
-  void _checkGeofences(Position position) {
+  void checkCoordinates(double latitude, double longitude) {
     for (var zone in _redZones) {
       final distance = Geolocator.distanceBetween(
-        position.latitude,
-        position.longitude,
+        latitude,
+        longitude,
         zone.latitude,
         zone.longitude,
       );
@@ -70,21 +76,68 @@ class GeofenceService {
         if (!_zonesInside.contains(zone.id)) {
           // Entered zone
           _zonesInside.add(zone.id);
-          NotificationService().showGeofenceAlert(
-            'PERINGATAN ZONA MERAH!',
-            'Anda telah memasuki daerah berbahaya: ${zone.name}. Harap waspada.',
-          );
+          _triggerGeofenceAlert(zone);
         }
       } else {
         if (_zonesInside.contains(zone.id)) {
-          // Exited zone
+          // Exited zone into Safe Zone
           _zonesInside.remove(zone.id);
+          _triggerSafeZoneExitAlert(zone);
         }
       }
     }
   }
 
+  void _checkGeofences(Position position) {
+    checkCoordinates(position.latitude, position.longitude);
+  }
+
+  void _triggerGeofenceAlert(RedZone zone) {
+    final title = 'PERINGATAN ZONA MERAH!';
+    final body = 'Anda telah memasuki daerah berbahaya: ${zone.name}. Harap waspada.';
+    
+    NotificationService().showGeofenceAlert(title, body);
+    _geofenceStreamController.add('MASUK ZONA MERAH: ${zone.name}');
+  }
+
+  void _triggerSafeZoneExitAlert(RedZone zone) {
+    final title = 'ANDA KEMBALI KE ZONA AMAN!';
+    final body = 'Anda telah keluar dari area berbahaya: ${zone.name}. Anda sekarang berada di Zona Aman.';
+    
+    NotificationService().showSafeZoneAlert(title, body);
+    _geofenceStreamController.add('KELUAR ZONA MERAH (ZONA AMAN): ${zone.name}');
+  }
+
+  /// Helper method for testing/simulating entering a red zone from UI
+  void simulateZoneEntry([RedZone? targetZone]) {
+    final zone = targetZone ?? (_redZones.isNotEmpty ? _redZones.first : RedZone(
+      id: '99',
+      name: 'Jl. Kalimantan (Rawan Begal)',
+      latitude: -8.1725,
+      longitude: 113.6983,
+      radius: 300.0,
+    ));
+
+    _zonesInside.add(zone.id);
+    _triggerGeofenceAlert(zone);
+  }
+
+  /// Helper method for testing/simulating exiting a red zone into SafeZone from UI
+  void simulateZoneExit([RedZone? targetZone]) {
+    final zone = targetZone ?? (_redZones.isNotEmpty ? _redZones.first : RedZone(
+      id: '99',
+      name: 'Jl. Kalimantan (Rawan Begal)',
+      latitude: -8.1725,
+      longitude: 113.6983,
+      radius: 300.0,
+    ));
+
+    _zonesInside.remove(zone.id);
+    _triggerSafeZoneExitAlert(zone);
+  }
+
   void dispose() {
     _positionStreamSubscription?.cancel();
+    _geofenceStreamController.close();
   }
 }

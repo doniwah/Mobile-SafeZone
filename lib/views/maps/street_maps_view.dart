@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../models/gis_marker.dart';
+import '../../models/red_zone.dart';
 import '../../services/api_service.dart';
+import '../../services/geofence_service.dart';
 import '../../widgets/desktop_frame.dart';
 
 class StreetMapsView extends StatefulWidget {
@@ -118,15 +120,27 @@ class _StreetMapsViewState extends State<StreetMapsView> {
                     urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                     userAgentPackageName: 'com.geocrime.geocrime_app',
                   ),
+                  // Geofence Red Zones Visual Circles
+                  CircleLayer(
+                    circles: GeofenceService().redZones.map((zone) {
+                      return CircleMarker(
+                        point: LatLng(zone.latitude, zone.longitude),
+                        radius: zone.radius,
+                        useRadiusInMeter: true,
+                        color: const Color(0xFFEF4444).withOpacity(0.22),
+                        borderColor: const Color(0xFFDC2626),
+                        borderStrokeWidth: 2.0,
+                      );
+                    }).toList(),
+                  ),
                   if (_heatmapEnabled) ...[
                     PolygonLayer(
-                      polygons: _districts.map((district) {
+                      polygons: _districts.map<Polygon>((district) {
                         return Polygon(
                           points: district.polygonPoints,
                           color: district.color.withOpacity(0.55),
                           borderColor: Colors.white.withOpacity(0.75),
                           borderStrokeWidth: 1.5,
-                          isFilled: true,
                         );
                       }).toList(),
                     ),
@@ -484,6 +498,79 @@ class _StreetMapsViewState extends State<StreetMapsView> {
                   ),
                   const SizedBox(height: 12),
 
+                  // Geofence Test / Simulation Button
+                  FloatingActionButton.small(
+                    heroTag: 'geofenceSimBtn',
+                    onPressed: () {
+                      final zones = GeofenceService().redZones;
+                      final targetZone = zones.isNotEmpty ? zones.first : null;
+                      if (targetZone != null) {
+                        _mapController.move(LatLng(targetZone.latitude, targetZone.longitude), 15.0);
+                      }
+                      GeofenceService().simulateZoneEntry(targetZone);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          behavior: SnackBarBehavior.floating,
+                          backgroundColor: const Color(0xFFEF4444),
+                          content: Row(
+                            children: const [
+                              Icon(Icons.warning_amber_rounded, color: Colors.white),
+                              SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Simulasi: Pengguna memasuki Zona Merah (Notifikasi dikirim!)',
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                                ),
+                              ),
+                            ],
+                          ),
+                          duration: const Duration(seconds: 3),
+                        ),
+                      );
+                    },
+                    backgroundColor: const Color(0xFFEF4444),
+                    foregroundColor: Colors.white,
+                    shape: const CircleBorder(),
+                    elevation: 6,
+                    child: const Icon(Icons.shield_rounded, size: 20),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // SafeZone Exit / Exit Red Zone Simulation Button
+                  FloatingActionButton.small(
+                    heroTag: 'safezoneExitSimBtn',
+                    onPressed: () {
+                      final zones = GeofenceService().redZones;
+                      final targetZone = zones.isNotEmpty ? zones.first : null;
+                      GeofenceService().simulateZoneExit(targetZone);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          behavior: SnackBarBehavior.floating,
+                          backgroundColor: const Color(0xFF10B981),
+                          content: Row(
+                            children: const [
+                              Icon(Icons.verified_user_rounded, color: Colors.white),
+                              SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Simulasi SafeZone: Pengguna telah keluar dari Zona Merah & masuk Zona Aman!',
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                                ),
+                              ),
+                            ],
+                          ),
+                          duration: const Duration(seconds: 3),
+                        ),
+                      );
+                    },
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.white,
+                    shape: const CircleBorder(),
+                    elevation: 6,
+                    child: const Icon(Icons.verified_user_rounded, size: 20),
+                  ),
+                  const SizedBox(height: 12),
+
                   // My Location Button
                   FloatingActionButton.small(
                     heroTag: 'myLocBtn',
@@ -547,6 +634,17 @@ class _StreetMapsViewState extends State<StreetMapsView> {
                         Text(
                           'Kecelakaan',
                           style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: const [
+                        Icon(Icons.shield_rounded, color: Color(0xFFEF4444), size: 11),
+                        SizedBox(width: 7),
+                        Text(
+                          'Zona Merah (Geofence)',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFFCA5A5)),
                         ),
                       ],
                     ),

@@ -249,7 +249,7 @@ class _HomeViewState extends State<HomeView> {
                               _buildTabItem(0, Icons.home_outlined, 'Beranda', itemWidth),
                               _buildTabItem(1, Icons.assignment_outlined, 'Laporan', itemWidth),
                               _buildCenterTabItem(itemWidth),
-                              _buildTabItem(3, Icons.radar_rounded, 'Lacak', itemWidth),
+                              _buildTabItem(3, Icons.alt_route_rounded, 'Rute Aman', itemWidth),
                               _buildTabItem(4, Icons.newspaper_rounded, 'Berita', itemWidth),
                             ],
                           ),

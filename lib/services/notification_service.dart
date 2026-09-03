@@ -23,7 +23,7 @@ class NotificationService {
       iOS: initializationSettingsIOS,
     );
 
-    await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+    await flutterLocalNotificationsPlugin.initialize(settings: initializationSettings);
 
     // Request permissions for Android 13+ and iOS
     flutterLocalNotificationsPlugin
@@ -54,10 +54,70 @@ class NotificationService {
     );
 
     await flutterLocalNotificationsPlugin.show(
-      0, // Notification ID
-      title,
-      body,
-      platformChannelSpecifics,
+      id: 0, // Notification ID
+      title: title,
+      body: body,
+      notificationDetails: platformChannelSpecifics,
+    );
+  }
+
+  Future<void> showCorridorAlert(String title, String body) async {
+    const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+      'corridor_channel',
+      'Geo-Corridor Route Alerts',
+      channelDescription: 'Notifications for route deviation alerts',
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+    );
+
+    const DarwinNotificationDetails iOSPlatformChannelSpecifics = DarwinNotificationDetails(
+      presentSound: true,
+      presentAlert: true,
+      presentBadge: true,
+    );
+
+    const NotificationDetails platformChannelSpecifics = NotificationDetails(
+      android: androidPlatformChannelSpecifics,
+      iOS: iOSPlatformChannelSpecifics,
+    );
+
+    await flutterLocalNotificationsPlugin.show(
+      id: 1, // Notification ID for Corridor Alert
+      title: title,
+      body: body,
+      notificationDetails: platformChannelSpecifics,
+    );
+  }
+
+  Future<void> showSafeZoneAlert(String title, String body) async {
+    const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+      'safezone_channel',
+      'SafeZone Alerts',
+      channelDescription: 'Notifications for exiting dangerous zones into safe areas',
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+    );
+
+    const DarwinNotificationDetails iOSPlatformChannelSpecifics = DarwinNotificationDetails(
+      presentSound: true,
+      presentAlert: true,
+      presentBadge: true,
+    );
+
+    const NotificationDetails platformChannelSpecifics = NotificationDetails(
+      android: androidPlatformChannelSpecifics,
+      iOS: iOSPlatformChannelSpecifics,
+    );
+
+    await flutterLocalNotificationsPlugin.show(
+      id: 2, // Notification ID for SafeZone Alert
+      title: title,
+      body: body,
+      notificationDetails: platformChannelSpecifics,
     );
   }
 }
