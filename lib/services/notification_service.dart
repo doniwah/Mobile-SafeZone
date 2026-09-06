@@ -23,7 +23,7 @@ class NotificationService {
       iOS: initializationSettingsIOS,
     );
 
-    await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+    await flutterLocalNotificationsPlugin.initialize(settings: initializationSettings);
 
     // Request permissions for Android 13+ and iOS
     flutterLocalNotificationsPlugin
@@ -54,10 +54,10 @@ class NotificationService {
     );
 
     await flutterLocalNotificationsPlugin.show(
-      0, // Notification ID
-      title,
-      body,
-      platformChannelSpecifics,
+      id: 0, // Notification ID
+      title: title,
+      body: body,
+      notificationDetails: platformChannelSpecifics,
     );
   }
 
@@ -84,10 +84,10 @@ class NotificationService {
     );
 
     await flutterLocalNotificationsPlugin.show(
-      1, // Notification ID for Corridor Alert
-      title,
-      body,
-      platformChannelSpecifics,
+      id: 1, // Notification ID for Corridor Alert
+      title: title,
+      body: body,
+      notificationDetails: platformChannelSpecifics,
     );
   }
 
@@ -114,10 +114,10 @@ class NotificationService {
     );
 
     await flutterLocalNotificationsPlugin.show(
-      2, // Notification ID for SafeZone Alert
-      title,
-      body,
-      platformChannelSpecifics,
+      id: 2, // Notification ID for SafeZone Alert
+      title: title,
+      body: body,
+      notificationDetails: platformChannelSpecifics,
     );
   }
 }

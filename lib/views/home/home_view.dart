@@ -209,8 +209,9 @@ class _HomeViewState extends State<HomeView> {
 
                       // Calculate left position for selected tab indicator circle
                       double leftPosition = 0;
-                      if (_selectedTab == 0) leftPosition = 0;
-                      else if (_selectedTab == 1) leftPosition = itemWidth;
+                      if (_selectedTab == 0) {
+                        leftPosition = 0;
+                      } else if (_selectedTab == 1) leftPosition = itemWidth;
                       else if (_selectedTab == 2) leftPosition = itemWidth * 2;
                       else if (_selectedTab == 3) leftPosition = itemWidth * 3;
                       else if (_selectedTab == 4) leftPosition = itemWidth * 4;

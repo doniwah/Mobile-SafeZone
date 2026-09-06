@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../models/gis_marker.dart';
-import '../../models/red_zone.dart';
 import '../../services/api_service.dart';
 import '../../services/geofence_service.dart';
 import '../../services/safe_route_service.dart';

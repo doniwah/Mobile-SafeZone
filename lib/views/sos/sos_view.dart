@@ -4,7 +4,6 @@ import 'package:geolocator/geolocator.dart';
 import '../../models/sos_signal.dart';
 import '../../models/sos_event.dart';
 import '../../database/app_database.dart';
-import '../../services/api_service.dart';
 import '../../services/connectivity_service.dart';
 import '../../services/emergency_communication_manager.dart';
 import 'sos_settings_view.dart';

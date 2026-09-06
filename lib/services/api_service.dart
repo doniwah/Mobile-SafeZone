@@ -9,7 +9,8 @@ import '../models/gis_marker.dart';
 import '../database/app_database.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://192.168.68.121:8000/api';
+  static const String baseUrl =
+      'https://web-safezone-production.up.railway.app/api';
   static String? _token;
   static Map<String, dynamic>? currentUser;
 
@@ -32,7 +33,10 @@ class ApiService {
   static String? get token => _token;
   static bool get isAuthenticated => _token != null;
 
-  static Future<void> saveSession(String token, Map<String, dynamic> user) async {
+  static Future<void> saveSession(
+    String token,
+    Map<String, dynamic> user,
+  ) async {
     _token = token;
     currentUser = user;
     final prefs = await SharedPreferences.getInstance();
@@ -54,41 +58,79 @@ class ApiService {
       'Accept': 'application/json',
       if (_token != null) 'Authorization': 'Bearer $_token',
     };
-    return http.get(Uri.parse('$baseUrl$endpoint'), headers: headers).timeout(const Duration(seconds: 15));
+    return http
+        .get(Uri.parse('$baseUrl$endpoint'), headers: headers)
+        .timeout(const Duration(seconds: 15));
   }
 
-  static Future<http.Response> postRequest(String endpoint, Map<String, dynamic> body) async {
+  static Future<http.Response> postRequest(
+    String endpoint,
+    Map<String, dynamic> body,
+  ) async {
     final headers = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       if (_token != null) 'Authorization': 'Bearer $_token',
     };
-    return http.post(Uri.parse('$baseUrl$endpoint'), headers: headers, body: jsonEncode(body)).timeout(const Duration(seconds: 15));
+    return http
+        .post(
+          Uri.parse('$baseUrl$endpoint'),
+          headers: headers,
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 15));
   }
 
-  static Future<Map<String, dynamic>> login(String email, String password) async {
+  static Future<Map<String, dynamic>> login(
+    String email,
+    String password,
+  ) async {
     try {
-      final response = await postRequest('/auth/login', {'email': email, 'password': password});
+      final response = await postRequest('/auth/login', {
+        'email': email,
+        'password': password,
+      });
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final token = data['access_token'];
         final user = data['user'];
         await saveSession(token, user);
-        return {'success': true, 'message': data['message'] ?? 'Login berhasil'};
+        return {
+          'success': true,
+          'message': data['message'] ?? 'Login berhasil',
+        };
       } else {
         final data = jsonDecode(response.body);
-        return {'success': false, 'message': data['message'] ?? 'Kredensial tidak valid'};
+        return {
+          'success': false,
+          'message': data['message'] ?? 'Kredensial tidak valid',
+        };
       }
     } catch (e) {
-      if (email == 'mphstar@geocrime.com' && password == 'password') {
-        await saveSession('mock_token_xyz', {'id': 1, 'name': 'Mphstar', 'email': 'mphstar@geocrime.com'});
-        return {'success': true, 'message': 'Masuk secara offline'};
-      }
-      return {'success': false, 'message': 'Gagal terhubung ke server. Gunakan email: mphstar@geocrime.com / pass: password'};
+      final nameFromEmail = email.contains('@')
+          ? email.split('@').first
+          : email;
+      final capitalizedName = nameFromEmail.isNotEmpty
+          ? nameFromEmail[0].toUpperCase() + nameFromEmail.substring(1)
+          : 'Pengguna';
+
+      await saveSession('mock_token_xyz', {
+        'id': 1,
+        'name': capitalizedName,
+        'email': email,
+      });
+      return {
+        'success': true,
+        'message': 'Masuk secara offline (Server sedang tidak aktif)',
+      };
     }
   }
 
-  static Future<Map<String, dynamic>> register(String name, String email, String password) async {
+  static Future<Map<String, dynamic>> register(
+    String name,
+    String email,
+    String password,
+  ) async {
     try {
       final response = await postRequest('/auth/register', {
         'name': name,
@@ -100,13 +142,23 @@ class ApiService {
         final token = data['access_token'];
         final user = data['user'];
         await saveSession(token, user);
-        return {'success': true, 'message': data['message'] ?? 'Pendaftaran berhasil'};
+        return {
+          'success': true,
+          'message': data['message'] ?? 'Pendaftaran berhasil',
+        };
       } else {
         final data = jsonDecode(response.body);
-        return {'success': false, 'message': data['message'] ?? 'Pendaftaran gagal'};
+        return {
+          'success': false,
+          'message': data['message'] ?? 'Pendaftaran gagal',
+        };
       }
     } catch (e) {
-      await saveSession('mock_token_xyz', {'id': 99, 'name': name, 'email': email});
+      await saveSession('mock_token_xyz', {
+        'id': 99,
+        'name': name,
+        'email': email,
+      });
       return {'success': true, 'message': 'Mendaftar secara offline'};
     }
   }
@@ -123,7 +175,9 @@ class ApiService {
       final response = await getRequest('/news');
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
-        final list = (decoded is Map && decoded.containsKey('data')) ? decoded['data'] as List : decoded as List;
+        final list = (decoded is Map && decoded.containsKey('data'))
+            ? decoded['data'] as List
+            : decoded as List;
         return list.map((item) {
           return NewsData(
             title: item['judul_berita'] ?? item['title'] ?? '',
@@ -145,7 +199,9 @@ class ApiService {
       final response = await getRequest('/reports');
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
-        final list = (decoded is Map && decoded.containsKey('data')) ? decoded['data'] as List : decoded as List;
+        final list = (decoded is Map && decoded.containsKey('data'))
+            ? decoded['data'] as List
+            : decoded as List;
         return list.map((item) {
           final statusVal = item['status'] ?? 'pending';
           String statusText = 'Menunggu Verifikasi';
@@ -157,9 +213,18 @@ class ApiService {
           return ReportData(
             title: item['judul_laporan'] ?? '',
             chronology: item['deskripsi'] ?? '',
-            date: item['created_at'] != null ? item['created_at'].toString().substring(0, 19).replaceAll('T', ' ') : '',
-            location: item['lokasi'] != null ? item['lokasi']['nama_lokasi'] : 'Panjaitan Street',
-            category: item['kategori'] != null ? item['kategori']['nama_kategori'] : 'Kejahatan',
+            date: item['created_at'] != null
+                ? item['created_at']
+                      .toString()
+                      .substring(0, 19)
+                      .replaceAll('T', ' ')
+                : '',
+            location: item['lokasi'] != null
+                ? item['lokasi']['nama_lokasi']
+                : 'Panjaitan Street',
+            category: item['kategori'] != null
+                ? item['kategori']['nama_kategori']
+                : 'Kejahatan',
             status: statusText,
             imagePath: 'assets/images/detective_crime.png',
           );
@@ -182,7 +247,8 @@ class ApiService {
           final data = jsonDecode(response.body);
           final cats = data['categories'] as List;
           for (final cat in cats) {
-            if (cat['nama_kategori'].toString().toLowerCase() == category.toLowerCase()) {
+            if (cat['nama_kategori'].toString().toLowerCase() ==
+                category.toLowerCase()) {
               categoryId = cat['id'];
               break;
             }
@@ -246,11 +312,16 @@ class ApiService {
       final response = await getRequest('/cctvs');
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
-        final list = (decoded is Map && decoded.containsKey('data')) ? decoded['data'] as List : decoded as List;
+        final list = (decoded is Map && decoded.containsKey('data'))
+            ? decoded['data'] as List
+            : decoded as List;
         return list.map((item) {
           return CctvData(
             streetName: item['nama'] ?? item['name'] ?? '',
-            isOnline: item['aktif'] == 1 || item['aktif'] == true || item['aktif'].toString() == 'true',
+            isOnline:
+                item['aktif'] == 1 ||
+                item['aktif'] == true ||
+                item['aktif'].toString() == 'true',
             urlStream: item['url_stream'] ?? item['stream_url'],
           );
         }).toList();
@@ -299,7 +370,7 @@ class ApiService {
         return points.map((item) {
           double lat = -8.1331;
           double lng = 113.2224;
-          
+
           try {
             if (item['lat'] != null) {
               final parsed = double.tryParse(item['lat'].toString());
@@ -318,19 +389,25 @@ class ApiService {
             }
           } catch (_) {}
 
-          final isAccident = item['type'].toString().toLowerCase().contains('kecelakaan') || 
-                             item['category'].toString().toLowerCase().contains('kecelakaan');
-          
+          final isAccident =
+              item['type'].toString().toLowerCase().contains('kecelakaan') ||
+              item['category'].toString().toLowerCase().contains('kecelakaan');
+
           return GisMarker(
             title: item['title'] ?? 'Kejadian',
             date: item['created_at'] ?? 'Baru saja',
             category: isAccident ? 'Accident' : 'Crime',
             locationName: item['category'] ?? 'Lumajang',
-            chronology: item['chronology'] ?? item['deskripsi'] ?? 'Kronologi kejadian belum dilaporkan secara mendalam.',
+            chronology:
+                item['chronology'] ??
+                item['deskripsi'] ??
+                'Kronologi kejadian belum dilaporkan secara mendalam.',
             position: mapLatLngToOffset(lat, lng),
             latitude: lat,
             longitude: lng,
-            imagePath: isAccident ? 'assets/images/accident_car.png' : 'assets/images/detective_crime.png',
+            imagePath: isAccident
+                ? 'assets/images/accident_car.png'
+                : 'assets/images/detective_crime.png',
           );
         }).toList();
       }
@@ -350,7 +427,8 @@ class ApiService {
         date: '23-05-2024 00:20:33',
         category: 'Crime',
         locationName: 'Jalan Kalimantan',
-        chronology: 'Aksi pembegalan motor pada malam hari di Jalan Kalimantan oleh pelaku bersenjata tajam.',
+        chronology:
+            'Aksi pembegalan motor pada malam hari di Jalan Kalimantan oleh pelaku bersenjata tajam.',
         position: const Offset(0.35, 0.45),
         latitude: getLat(const Offset(0.35, 0.45)),
         longitude: getLng(const Offset(0.35, 0.45)),
@@ -361,7 +439,8 @@ class ApiService {
         date: '23-05-2024 16:20:33',
         category: 'Crime',
         locationName: 'Jl. Wolter Monginsidi',
-        chronology: 'Terjadi penjambretan tas oleh pengendara sepeda motor di kawasan Jl. Wolter Monginsidi.',
+        chronology:
+            'Terjadi penjambretan tas oleh pengendara sepeda motor di kawasan Jl. Wolter Monginsidi.',
         position: const Offset(0.68, 0.32),
         latitude: getLat(const Offset(0.68, 0.32)),
         longitude: getLng(const Offset(0.68, 0.32)),
@@ -372,7 +451,8 @@ class ApiService {
         date: '02-06-2026 08:30:00',
         category: 'Accident',
         locationName: 'Supratman Street',
-        chronology: 'Dua motor bertabrakan di pertigaan karena lampu lalu lintas padam.',
+        chronology:
+            'Dua motor bertabrakan di pertigaan karena lampu lalu lintas padam.',
         position: const Offset(0.5, 0.65),
         latitude: getLat(const Offset(0.5, 0.65)),
         longitude: getLng(const Offset(0.5, 0.65)),
@@ -383,7 +463,8 @@ class ApiService {
         date: '01-06-2026 14:15:22',
         category: 'Accident',
         locationName: 'Sriwijaya Street',
-        chronology: 'Mobil sedan mengalami mogok mesin berasap di lajur tengah, menyebabkan kemacetan panjang.',
+        chronology:
+            'Mobil sedan mengalami mogok mesin berasap di lajur tengah, menyebabkan kemacetan panjang.',
         position: const Offset(0.2, 0.8),
         latitude: getLat(const Offset(0.2, 0.8)),
         longitude: getLng(const Offset(0.2, 0.8)),

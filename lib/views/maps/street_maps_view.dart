@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../models/gis_marker.dart';
-import '../../models/red_zone.dart';
 import '../../services/api_service.dart';
 import '../../services/geofence_service.dart';
 import '../../widgets/desktop_frame.dart';
@@ -135,13 +134,12 @@ class _StreetMapsViewState extends State<StreetMapsView> {
                   ),
                   if (_heatmapEnabled) ...[
                     PolygonLayer(
-                      polygons: _districts.map((district) {
+                      polygons: _districts.map<Polygon>((district) {
                         return Polygon(
                           points: district.polygonPoints,
                           color: district.color.withOpacity(0.55),
                           borderColor: Colors.white.withOpacity(0.75),
                           borderStrokeWidth: 1.5,
-                          isFilled: true,
                         );
                       }).toList(),
                     ),
