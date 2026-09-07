@@ -3,6 +3,7 @@ import 'services/api_service.dart';
 import 'services/emergency_sync_manager.dart';
 import 'services/notification_service.dart';
 import 'services/geofence_service.dart';
+import 'services/sos_nearby_service.dart';
 import 'views/home/home_view.dart';
 import 'views/onboarding/onboarding_view.dart';
 
@@ -13,6 +14,11 @@ void main() async {
   
   await NotificationService().initialize();
   GeofenceService().initialize();
+
+  // Mulai polling SOS terdekat jika user sudah login
+  if (ApiService.isAuthenticated) {
+    SosNearbyService().start();
+  }
   
   runApp(const MyApp());
 }

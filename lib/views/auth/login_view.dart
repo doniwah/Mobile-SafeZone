@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
+import '../../services/sos_nearby_service.dart';
 import '../../widgets/desktop_frame.dart';
 import '../home/home_view.dart';
 import 'register_view.dart';
@@ -64,6 +65,9 @@ class _LoginViewContentState extends State<LoginViewContent> {
       });
 
       if (res['success']) {
+        // Mulai polling SOS terdekat segera setelah login berhasil
+        SosNearbyService().start();
+
         Navigator.of(context).pushAndRemoveUntil(
           PageRouteBuilder(
             pageBuilder: (context, a, sa) => const HomeView(),

@@ -350,6 +350,34 @@ class ApiService {
     return AppDatabase.sosHistory.length;
   }
 
+  /// Mengambil daftar kejadian SOS terbaru dari backend.
+  /// Mengembalikan list of map dengan field: sos_id, latitude, longitude,
+  /// alamat_terdeteksi, created_at. List kosong jika gagal atau tidak tersedia.
+  static Future<List<Map<String, dynamic>>> fetchRecentSosEvents() async {
+    try {
+      final response = await getRequest('/sos');
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        // Tangani berbagai format respons backend
+        List<dynamic>? list;
+        if (data is List) {
+          list = data;
+        } else if (data is Map) {
+          list =
+              data['data'] as List? ??
+              data['sos'] as List? ??
+              data['events'] as List?;
+        }
+
+        if (list == null) return [];
+
+        return list.whereType<Map<String, dynamic>>().toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
   static Offset mapLatLngToOffset(double lat, double lng) {
     const double latMin = -8.25;
     const double latMax = -8.05;

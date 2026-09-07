@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -32,23 +35,33 @@ class NotificationService {
   }
 
   Future<void> showGeofenceAlert(String title, String body) async {
-    const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
-      'geofence_channel',
-      'Geofence Alerts',
-      channelDescription: 'Notifications for dangerous zones',
+    // Menggunakan channel baru 'geofence_danger_channel' agar custom sound terdaftar.
+    // (Android tidak mengizinkan perubahan sound pada channel yang sudah ada)
+    final AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+      'geofence_danger_channel',
+      'Geofence Danger Alerts',
+      channelDescription: 'Notifikasi peringatan saat memasuki zona rawan',
       importance: Importance.max,
       priority: Priority.high,
-      playSound: true, // Will play default notification sound
+      playSound: true,
+      sound: const RawResourceAndroidNotificationSound('danger_alert'),
       enableVibration: true,
+      vibrationPattern: Int64List.fromList([0, 500, 200, 500, 200, 500]),
+      enableLights: true,
+      color: const Color(0xFFEF4444),
+      ledColor: const Color(0xFFEF4444),
+      ledOnMs: 300,
+      ledOffMs: 300,
     );
 
     const DarwinNotificationDetails iOSPlatformChannelSpecifics = DarwinNotificationDetails(
       presentSound: true,
+      sound: 'danger_alert.mp3', // Custom sound untuk iOS
       presentAlert: true,
       presentBadge: true,
     );
 
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
+    final NotificationDetails platformChannelSpecifics = NotificationDetails(
       android: androidPlatformChannelSpecifics,
       iOS: iOSPlatformChannelSpecifics,
     );
@@ -92,23 +105,32 @@ class NotificationService {
   }
 
   Future<void> showSafeZoneAlert(String title, String body) async {
-    const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
-      'safezone_channel',
-      'SafeZone Alerts',
-      channelDescription: 'Notifications for exiting dangerous zones into safe areas',
-      importance: Importance.max,
+    // Channel baru 'safezone_safe_channel' dengan custom sound berbeda (lebih tenang)
+    final AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+      'safezone_safe_channel',
+      'SafeZone Safe Alerts',
+      channelDescription: 'Notifikasi saat keluar dari zona rawan ke zona aman',
+      importance: Importance.high,
       priority: Priority.high,
       playSound: true,
+      sound: const RawResourceAndroidNotificationSound('safe_zone_alert'),
       enableVibration: true,
+      vibrationPattern: Int64List.fromList([0, 400, 200, 400]),
+      enableLights: true,
+      color: const Color(0xFF22C55E),   // Hijau — zona aman
+      ledColor: const Color(0xFF22C55E),
+      ledOnMs: 500,
+      ledOffMs: 1000,
     );
 
     const DarwinNotificationDetails iOSPlatformChannelSpecifics = DarwinNotificationDetails(
       presentSound: true,
+      sound: 'safe_zone_alert.mp3', // Custom sound untuk iOS
       presentAlert: true,
       presentBadge: true,
     );
 
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
+    final NotificationDetails platformChannelSpecifics = NotificationDetails(
       android: androidPlatformChannelSpecifics,
       iOS: iOSPlatformChannelSpecifics,
     );
@@ -118,6 +140,46 @@ class NotificationService {
       title: title,
       body: body,
       notificationDetails: platformChannelSpecifics,
+    );
+  }
+
+  /// Menampilkan notifikasi darurat ketika terdeteksi SOS dalam radius 2km
+  /// dari posisi pengguna saat ini.
+  Future<void> showSosNearbyAlert({
+    required String address,
+    required String distanceLabel,
+  }) async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'sos_nearby_channel',
+      'SOS Terdekat',
+      channelDescription: 'Peringatan darurat SOS yang terjadi di sekitar Anda dalam radius 2 km',
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+      enableLights: true,
+      color: Color(0xFFEF4444),
+      ledColor: Color(0xFFEF4444),
+      ledOnMs: 500,
+      ledOffMs: 500,
+    );
+
+    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+      presentSound: true,
+      presentAlert: true,
+      presentBadge: true,
+    );
+
+    const NotificationDetails platformDetails = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+
+    await flutterLocalNotificationsPlugin.show(
+      id: 99, // ID tetap; notifikasi baru akan menggantikan yang lama
+      title: '⚠️ Darurat di Sekitar Anda!',
+      body: 'Ada sinyal SOS sejauh $distanceLabel dari Anda ($address). Harap waspada!',
+      notificationDetails: platformDetails,
     );
   }
 }

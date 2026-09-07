@@ -6,6 +6,7 @@ import '../../models/sos_event.dart';
 import '../../database/app_database.dart';
 import '../../services/connectivity_service.dart';
 import '../../services/emergency_communication_manager.dart';
+import '../../services/sos_nearby_service.dart';
 import 'sos_settings_view.dart';
 import 'emergency_map_view.dart';
 
@@ -131,6 +132,9 @@ class _SosViewState extends State<SosView> with SingleTickerProviderStateMixin {
         final double lat = loc['latitude']!;
         final double lng = loc['longitude']!;
         final double accuracy = loc['accuracy'] ?? 0.0;
+
+        // Perbarui lokasi user di SosNearbyService agar akurat
+        SosNearbyService().updateLocation(lat, lng);
 
         final isYogya = (lat >= -8.1 && lat <= -7.5 && lng >= 110.0 && lng <= 110.6);
         final String address = isYogya ? 'Yogyakarta, Indonesia' : 'Lumajang, Jawa Timur';
