@@ -62,12 +62,13 @@ class NotificationService {
     }
 
     final AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
-      'geofence_danger_channel_v2',
-      'Geofence Danger Alerts',
-      channelDescription: 'Notifikasi peringatan saat memasuki zona rawan',
+      'geofence_danger_voice_channel_v1',
+      'Geofence Danger Voice Alerts',
+      channelDescription: 'Notifikasi peringatan suara saat memasuki zona rawan',
       importance: Importance.max,
       priority: Priority.high,
       playSound: true,
+      sound: const RawResourceAndroidNotificationSound('zona_rawan'),
       enableVibration: true,
       vibrationPattern: Int64List.fromList([0, 500, 200, 500, 200, 500]),
       enableLights: true,

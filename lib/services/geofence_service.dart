@@ -17,6 +17,7 @@ class GeofenceService {
   Timer? _refreshTimer;
   List<RedZone> _redZones = [];
   final Set<String> _zonesInside = {}; // Track zones currently inside to avoid spamming notifications
+  Position? _lastPosition;
 
   final _geofenceStreamController = StreamController<String>.broadcast();
   Stream<String> get onGeofenceAlert => _geofenceStreamController.stream;
@@ -26,6 +27,7 @@ class GeofenceService {
 
   List<RedZone> get redZones => List.unmodifiable(_redZones);
   Set<String> get zonesInside => Set.unmodifiable(_zonesInside);
+  Position? get lastPosition => _lastPosition;
 
   Future<void> initialize() async {
     await _fetchRedZones();
@@ -153,6 +155,7 @@ class GeofenceService {
         desiredAccuracy: LocationAccuracy.high,
         timeLimit: const Duration(seconds: 5),
       );
+      _lastPosition = pos;
       checkCoordinates(pos.latitude, pos.longitude);
     } catch (_) {}
   }
@@ -172,12 +175,14 @@ class GeofenceService {
     try {
       final lastPos = await Geolocator.getLastKnownPosition();
       if (lastPos != null) {
+        _lastPosition = lastPos;
         _checkGeofences(lastPos);
       }
       final currentPos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
         timeLimit: const Duration(seconds: 4),
       );
+      _lastPosition = currentPos;
       _checkGeofences(currentPos);
     } catch (_) {}
 
@@ -188,6 +193,7 @@ class GeofenceService {
         distanceFilter: 10, // Update every 10 meters
       ),
     ).listen((Position position) {
+      _lastPosition = position;
       _checkGeofences(position);
     });
   }

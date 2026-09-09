@@ -40,18 +40,24 @@ class _TrackingViewState extends State<TrackingView> {
   bool _showStartSuggestions = false;
   bool _showDestSuggestions = false;
   bool _isFetchingGps = false;
+  bool _isMapReady = false;
 
   // Default start location is Lokasi Saat Ini (GPS Realtime)
   LumajangLocation _startLocation = LumajangLocation(
     id: 'current_location',
     name: 'Lokasi Saat Ini',
-    location: const LatLng(-8.1331, 113.2224),
-    address: 'Menghubungkan ke GPS perangkat...',
+    location: GeofenceService().lastPosition != null
+        ? LatLng(GeofenceService().lastPosition!.latitude, GeofenceService().lastPosition!.longitude)
+        : const LatLng(-8.1331, 113.2224),
+    address: GeofenceService().lastPosition != null
+        ? 'GPS Terdeteksi'
+        : 'Menghubungkan ke GPS perangkat...',
   );
   LumajangLocation? _destinationLocation;
 
   SafeRouteOption? _selectedRoute;
   List<SafeRouteOption> _availableRoutes = [];
+  bool _isLoadingRoutes = false;
   StreamSubscription<Map<String, dynamic>>? _corridorSubscription;
 
   final List<FamilyMember> _family = [
@@ -62,6 +68,15 @@ class _TrackingViewState extends State<TrackingView> {
   void initState() {
     super.initState();
     _startController.text = 'Lokasi Saat Ini';
+    final cached = GeofenceService().lastPosition;
+    if (cached != null) {
+      _startLocation = LumajangLocation(
+        id: 'current_location',
+        name: 'Lokasi Saat Ini',
+        location: LatLng(cached.latitude, cached.longitude),
+        address: 'GPS Presisi Terkini',
+      );
+    }
     _loadIncidentMarkers();
     _fetchCurrentLocation();
 
@@ -110,25 +125,44 @@ class _TrackingViewState extends State<TrackingView> {
     } catch (_) {}
   }
 
-  void _recalculateRoutes() {
+  Future<void> _recalculateRoutes() async {
     if (_destinationLocation == null) return;
 
-    final routes = SafeRouteService().calculateSafeRoutes(
-      start: _startLocation.location,
-      destination: _destinationLocation!.location,
-      incidentMarkers: _incidentMarkers,
-      redZones: GeofenceService().redZones,
-    );
-
     setState(() {
-      _availableRoutes = routes;
-      _selectedRoute = routes.isNotEmpty ? routes[0] : null;
+      _isLoadingRoutes = true;
       _showStartSuggestions = false;
       _showDestSuggestions = false;
     });
 
-    if (_destinationLocation != null) {
-      _mapController.move(_destinationLocation!.location, 14.2);
+    try {
+      final routes = await SafeRouteService().calculateSafeRoutes(
+        start: _startLocation.location,
+        destination: _destinationLocation!.location,
+        incidentMarkers: _incidentMarkers,
+        redZones: GeofenceService().redZones,
+      );
+
+      if (mounted) {
+        setState(() {
+          _availableRoutes = routes;
+          _selectedRoute = routes.isNotEmpty ? routes[0] : null;
+          _isLoadingRoutes = false;
+        });
+
+        if (_destinationLocation != null && _isMapReady) {
+          try {
+            final midLat = (_startLocation.location.latitude + _destinationLocation!.location.latitude) / 2;
+            final midLng = (_startLocation.location.longitude + _destinationLocation!.location.longitude) / 2;
+            _mapController.move(LatLng(midLat, midLng), 13.5);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isLoadingRoutes = false;
+        });
+      }
     }
   }
 
@@ -169,6 +203,11 @@ class _TrackingViewState extends State<TrackingView> {
             address: 'GPS Akurasi Cepat',
           );
         });
+        if (_isMapReady && _destinationLocation == null) {
+          try {
+            _mapController.move(LatLng(lastKnown.latitude, lastKnown.longitude), 15.0);
+          } catch (_) {}
+        }
       }
 
       Position position = await Geolocator.getCurrentPosition(
@@ -185,10 +224,17 @@ class _TrackingViewState extends State<TrackingView> {
             address: 'GPS Presisi Tinggi',
           );
           _startController.text = 'Lokasi Saat Ini';
+        });
+
+        if (_isMapReady) {
           if (_destinationLocation != null) {
             _recalculateRoutes();
+          } else {
+            try {
+              _mapController.move(LatLng(position.latitude, position.longitude), 15.0);
+            } catch (_) {}
           }
-        });
+        }
 
         if (showFeedback) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -212,13 +258,16 @@ class _TrackingViewState extends State<TrackingView> {
   }
 
   void _selectCurrentLocationAsStart() {
+    final cached = GeofenceService().lastPosition;
     setState(() {
       _startLocation = LumajangLocation(
         id: 'current_location',
         name: 'Lokasi Saat Ini',
         location: _startLocation.name == 'Lokasi Saat Ini'
             ? _startLocation.location
-            : const LatLng(-8.1331, 113.2224),
+            : (cached != null
+                ? LatLng(cached.latitude, cached.longitude)
+                : const LatLng(-8.1331, 113.2224)),
         address: 'GPS Realtime Terkini',
       );
       _startController.text = 'Lokasi Saat Ini';
@@ -227,6 +276,10 @@ class _TrackingViewState extends State<TrackingView> {
     _fetchCurrentLocation(showFeedback: true);
     if (_destinationLocation != null) {
       _recalculateRoutes();
+    } else if (_isMapReady) {
+      try {
+        _mapController.move(_startLocation.location, 15.0);
+      } catch (_) {}
     }
   }
 
@@ -570,12 +623,23 @@ class _TrackingViewState extends State<TrackingView> {
 
   @override
   Widget build(BuildContext context) {
-    final searchFilteredStart = SafeRouteService.lumajangLocations.where((loc) {
+    // Dynamic location candidates: red zones from backend (Makassar/other cities) + predefined points
+    final List<LumajangLocation> allLocations = [
+      ...GeofenceService().redZones.map((z) => LumajangLocation(
+        id: z.id,
+        name: z.name,
+        address: '${z.category} (${z.dangerLevel})',
+        location: LatLng(z.latitude, z.longitude),
+      )),
+      ...SafeRouteService.lumajangLocations,
+    ];
+
+    final searchFilteredStart = allLocations.where((loc) {
       final query = _startController.text.toLowerCase();
       return loc.name.toLowerCase().contains(query) || loc.address.toLowerCase().contains(query);
     }).toList();
 
-    final searchFilteredDest = SafeRouteService.lumajangLocations.where((loc) {
+    final searchFilteredDest = allLocations.where((loc) {
       final query = _destinationController.text.toLowerCase();
       return loc.name.toLowerCase().contains(query) || loc.address.toLowerCase().contains(query);
     }).toList();
@@ -728,7 +792,7 @@ class _TrackingViewState extends State<TrackingView> {
                                 color: Color(0xFF0F172A),
                               ),
                               decoration: const InputDecoration(
-                                hintText: 'Pilih titik awal di Lumajang...',
+                                hintText: 'Pilih titik awal atau cari lokasi...',
                                 hintStyle: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
                                 border: InputBorder.none,
                                 isDense: true,
@@ -817,7 +881,7 @@ class _TrackingViewState extends State<TrackingView> {
                                 color: Color(0xFF0F172A),
                               ),
                               decoration: const InputDecoration(
-                                hintText: 'Pilih titik tujuan di Lumajang...',
+                                hintText: 'Pilih titik tujuan atau ketuk di peta...',
                                 hintStyle: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
                                 border: InputBorder.none,
                                 isDense: true,
@@ -959,171 +1023,234 @@ class _TrackingViewState extends State<TrackingView> {
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(24),
-                    child: FlutterMap(
-                      mapController: _mapController,
-                      options: MapOptions(
-                        initialCenter: _startLocation.location,
-                        initialZoom: 14.0,
-                        minZoom: 10.0,
-                        maxZoom: 17.0,
-                      ),
+                    child: Stack(
                       children: [
-                        // Map Tiles (OpenStreetMap)
-                        TileLayer(
-                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.geocrime.geocrime_app',
-                        ),
-
-                        // Red Zones circles
-                        CircleLayer(
-                          circles: GeofenceService().redZones.map((zone) {
-                            return CircleMarker(
-                              point: LatLng(zone.latitude, zone.longitude),
-                              radius: zone.radius,
-                              useRadiusInMeter: true,
-                              color: const Color(0xFFEF4444).withOpacity(0.18),
-                              borderColor: const Color(0xFFEF4444),
-                              borderStrokeWidth: 1.5,
-                            );
-                          }).toList(),
-                        ),
-
-                        // Red Zones interactive markers (Tapping opens Safety Tips)
-                        MarkerLayer(
-                          markers: GeofenceService().redZones.map((zone) {
-                            return Marker(
-                              point: LatLng(zone.latitude, zone.longitude),
-                              width: 34,
-                              height: 34,
-                              child: GestureDetector(
-                                onTap: () {
-                                  SafetyTipsBottomSheet.show(context, zone);
-                                },
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFEF4444),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: Colors.white, width: 1.5),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: const Color(0xFFEF4444).withOpacity(0.5),
-                                        blurRadius: 6,
-                                        spreadRadius: 1,
-                                      ),
-                                    ],
-                                  ),
-                                  child: const Icon(
-                                    Icons.shield_rounded,
-                                    color: Colors.white,
-                                    size: 18,
-                                  ),
+                        FlutterMap(
+                          mapController: _mapController,
+                          options: MapOptions(
+                            initialCenter: _startLocation.location,
+                            initialZoom: 14.5,
+                            minZoom: 6.0,
+                            maxZoom: 18.0,
+                            onMapReady: () {
+                              _isMapReady = true;
+                              if (_startLocation.name == 'Lokasi Saat Ini' &&
+                                  (_startLocation.location.latitude != -8.1331 || _startLocation.location.longitude != 113.2224)) {
+                                try {
+                                  _mapController.move(_startLocation.location, 14.5);
+                                } catch (_) {}
+                              }
+                            },
+                            onTap: (tapPosition, point) {
+                              setState(() {
+                                _destinationLocation = LumajangLocation(
+                                  id: 'custom_dest',
+                                  name: 'Titik Peta (${point.latitude.toStringAsFixed(3)}, ${point.longitude.toStringAsFixed(3)})',
+                                  address: 'Koordinat yang dipilih',
+                                  location: point,
+                                );
+                                _destinationController.text = _destinationLocation!.name;
+                                _showDestSuggestions = false;
+                                _showStartSuggestions = false;
+                              });
+                              _recalculateRoutes();
+                              ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  behavior: SnackBarBehavior.floating,
+                                  backgroundColor: const Color(0xFF0F172A),
+                                  content: Text('Titik tujuan diatur: ${_destinationLocation!.name}'),
+                                  duration: const Duration(seconds: 2),
                                 ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-
-                        // Incident Markers circles
-                        CircleLayer(
-                          circles: _incidentMarkers.map((marker) {
-                            final color = marker.category == 'Crime'
-                                ? const Color(0xFFEF4444)
-                                : const Color(0xFFF97316);
-                            return CircleMarker(
-                              point: LatLng(marker.latitude, marker.longitude),
-                              radius: 120,
-                              useRadiusInMeter: true,
-                              color: color.withOpacity(0.20),
-                              borderStrokeWidth: 0,
-                            );
-                          }).toList(),
-                        ),
-
-                        // Geo-Corridor Buffer Visual Layer (thick boundary when monitoring)
-                        if (isCorridorActive && activeCorridorRoute != null)
-                          PolylineLayer(
-                            polylines: [
-                              Polyline(
-                                points: activeCorridorRoute.path,
-                                color: (isDeviated ? const Color(0xFFEF4444) : activeCorridorRoute.color).withOpacity(0.25),
-                                strokeWidth: 36.0, // Visual corridor buffer representation
-                              ),
-                            ],
-                          ),
-
-                        // Safe / Warning / Danger Polyline routing
-                        if (_availableRoutes.isNotEmpty)
-                          PolylineLayer(
-                            polylines: _availableRoutes.map((route) {
-                              final isSelected = _selectedRoute == route;
-                              return Polyline(
-                                points: route.path,
-                                color: isSelected ? route.color : route.color.withOpacity(0.35),
-                                strokeWidth: isSelected ? 6.0 : 3.5,
-                                pattern: isSelected ? const StrokePattern.solid() : StrokePattern.dashed(segments: [6, 4]),
                               );
-                            }).toList(),
+                            },
                           ),
+                          children: [
+                            // Map Tiles (OpenStreetMap)
+                            TileLayer(
+                              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                              userAgentPackageName: 'com.geocrime.geocrime_app',
+                            ),
 
-                        // User Start location and Destination Pin Markers
-                        MarkerLayer(
-                          markers: [
-                            // Start Location Marker
-                            Marker(
-                              point: _startLocation.location,
-                              width: 80,
-                              height: 50,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF10B981),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      _startLocation.name,
-                                      style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                            // Polygon Layer for GeoJSON red zones (like Makassar)
+                            PolygonLayer(
+                              polygons: GeofenceService().redZones
+                                  .where((z) => z.polygonCoordinates != null && z.polygonCoordinates!.isNotEmpty)
+                                  .map<Polygon>((zone) {
+                                return Polygon(
+                                  points: zone.polygonCoordinates!.map((pt) => LatLng(pt[1], pt[0])).toList(),
+                                  color: const Color(0xFFEF4444).withOpacity(0.22),
+                                  borderColor: const Color(0xFFEF4444),
+                                  borderStrokeWidth: 2.0,
+                                );
+                              }).toList(),
+                            ),
+
+                            // Red Zones interactive markers (Tapping opens Safety Tips)
+                            MarkerLayer(
+                              markers: GeofenceService().redZones.map((zone) {
+                                return Marker(
+                                  point: LatLng(zone.latitude, zone.longitude),
+                                  width: 34,
+                                  height: 34,
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      SafetyTipsBottomSheet.show(context, zone);
+                                    },
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFEF4444),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(color: Colors.white, width: 1.5),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: const Color(0xFFEF4444).withOpacity(0.5),
+                                            blurRadius: 6,
+                                            spreadRadius: 1,
+                                          ),
+                                        ],
+                                      ),
+                                      child: const Icon(
+                                        Icons.shield_rounded,
+                                        color: Colors.white,
+                                        size: 18,
+                                      ),
                                     ),
                                   ),
-                                  const Icon(Icons.my_location_rounded, color: Color(0xFF10B981), size: 24),
+                                );
+                              }).toList(),
+                            ),
+
+                            // Geo-Corridor Buffer Visual Layer (thick boundary when monitoring)
+                            if (isCorridorActive && activeCorridorRoute != null)
+                              PolylineLayer(
+                                polylines: [
+                                  Polyline(
+                                    points: activeCorridorRoute.path,
+                                    color: (isDeviated ? const Color(0xFFEF4444) : activeCorridorRoute.color).withOpacity(0.25),
+                                    strokeWidth: 36.0, // Visual corridor buffer representation
+                                  ),
                                 ],
                               ),
+
+                            // Safe / Warning / Danger Polyline routing
+                            if (_availableRoutes.isNotEmpty)
+                              PolylineLayer(
+                                polylines: _availableRoutes.map((route) {
+                                  final isSelected = _selectedRoute == route;
+                                  return Polyline(
+                                    points: route.path,
+                                    color: isSelected ? route.color : route.color.withOpacity(0.35),
+                                    strokeWidth: isSelected ? 6.0 : 3.5,
+                                    pattern: isSelected ? const StrokePattern.solid() : StrokePattern.dashed(segments: [6, 4]),
+                                  );
+                                }).toList(),
+                              ),
+
+                            // User Start location and Destination Pin Markers
+                            MarkerLayer(
+                              markers: [
+                                // Start Location Marker (User Location)
+                                Marker(
+                                  point: _startLocation.location,
+                                  width: 90,
+                                  height: 52,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF10B981),
+                                          borderRadius: BorderRadius.circular(6),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withOpacity(0.15),
+                                              blurRadius: 4,
+                                            ),
+                                          ],
+                                        ),
+                                        child: Text(
+                                          _startLocation.name,
+                                          style: const TextStyle(color: Colors.white, fontSize: 8.5, fontWeight: FontWeight.bold),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      const Icon(Icons.my_location_rounded, color: Color(0xFF10B981), size: 24),
+                                    ],
+                                  ),
+                                ),
+                                // Destination Location Marker
+                                if (_destinationLocation != null)
+                                  Marker(
+                                    point: _destinationLocation!.location,
+                                    width: 90,
+                                    height: 52,
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: _selectedRoute?.color ?? const Color(0xFFEF4444),
+                                            borderRadius: BorderRadius.circular(6),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withOpacity(0.15),
+                                                blurRadius: 4,
+                                              ),
+                                            ],
+                                          ),
+                                          child: Text(
+                                            _destinationLocation!.name,
+                                            style: const TextStyle(color: Colors.white, fontSize: 8.5, fontWeight: FontWeight.bold),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        Icon(
+                                          Icons.location_on_rounded,
+                                          color: _selectedRoute?.color ?? const Color(0xFFEF4444),
+                                          size: 24,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
                             ),
-                            // Destination Location Marker
-                            if (_destinationLocation != null)
-                              Marker(
-                                point: _destinationLocation!.location,
-                                width: 90,
-                                height: 50,
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: _selectedRoute?.color ?? const Color(0xFFEF4444),
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        _destinationLocation!.name,
-                                        style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    Icon(
-                                      Icons.location_on_rounded,
-                                      color: _selectedRoute?.color ?? const Color(0xFFEF4444),
-                                      size: 24,
-                                    ),
-                                  ],
+                          ],
+                        ),
+
+                        // Floating Recenter to My Location Button on Map
+                        Positioned(
+                          right: 12,
+                          bottom: 12,
+                          child: Material(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            elevation: 4,
+                            shadowColor: Colors.black.withOpacity(0.2),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: () {
+                                _fetchCurrentLocation(showFeedback: true);
+                                if (_isMapReady) {
+                                  try {
+                                    _mapController.move(_startLocation.location, 15.0);
+                                  } catch (_) {}
+                                }
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(10),
+                                child: const Icon(
+                                  Icons.my_location_rounded,
+                                  color: Color(0xFF10B981),
+                                  size: 22,
                                 ),
                               ),
-                          ],
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -1132,7 +1259,40 @@ class _TrackingViewState extends State<TrackingView> {
                 const SizedBox(height: 20),
 
                 // Predefined Route Selector Options (under map)
-                if (_availableRoutes.isNotEmpty) ...[
+                if (_isLoadingRoutes) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      children: const [
+                        SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color: Color(0xFF10B981),
+                          ),
+                        ),
+                        SizedBox(height: 12),
+                        Text(
+                          'Menghubungkan ke jaringan jalan & menghitung rute aman...',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF64748B),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ] else if (_availableRoutes.isNotEmpty) ...[
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [

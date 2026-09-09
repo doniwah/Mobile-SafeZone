@@ -131,19 +131,7 @@ class _StreetMapsViewState extends State<StreetMapsView> {
                     urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                     userAgentPackageName: 'com.geocrime.geocrime_app',
                   ),
-                  // Geofence Red Zones Visual Circles
-                  CircleLayer(
-                    circles: GeofenceService().redZones.map((zone) {
-                      return CircleMarker(
-                        point: LatLng(zone.latitude, zone.longitude),
-                        radius: zone.radius,
-                        useRadiusInMeter: true,
-                        color: const Color(0xFFEF4444).withOpacity(0.22),
-                        borderColor: const Color(0xFFDC2626),
-                        borderStrokeWidth: 2.0,
-                      );
-                    }).toList(),
-                  ),
+
                   // Geofence Red Zones Interactive Centroid Markers
                   MarkerLayer(
                     markers: GeofenceService().redZones.map((zone) {

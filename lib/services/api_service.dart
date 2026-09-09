@@ -10,7 +10,7 @@ import '../database/app_database.dart';
 
 class ApiService {
   static const String baseUrl =
-      'https://consist-familiar-calendar-generating.trycloudflare.com/api';
+      'https://web-safezone-production.up.railway.app/api';
   static String? _token;
   static Map<String, dynamic>? currentUser;
 

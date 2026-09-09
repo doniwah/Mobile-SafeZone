@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import '../models/gis_marker.dart';
@@ -218,105 +220,194 @@ class SafeRouteService {
     return double.parse((totalMeters / 1000.0).toStringAsFixed(1));
   }
 
-  /// Menghasilkan 3 variasi rute dari Start ke Destination dan mengukur skor keamanan masing-masing
-  List<SafeRouteOption> calculateSafeRoutes({
+  /// Mengambil rute yang presisi mengikuti jaringan jalan (road-snapping) via OSRM API
+  Future<List<List<LatLng>>> _fetchRoadRoutes(LatLng start, LatLng destination) async {
+    List<List<LatLng>> roadPaths = [];
+
+    // 1. Panggil OSRM dengan alternatives=true
+    try {
+      final url = Uri.parse(
+        'https://router.project-osrm.org/route/v1/driving/'
+        '${start.longitude},${start.latitude};${destination.longitude},${destination.latitude}'
+        '?overview=full&geometries=geojson&alternatives=true',
+      );
+      final response = await http.get(url).timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['code'] == 'Ok' && data['routes'] is List) {
+          for (var r in data['routes']) {
+            if (r['geometry'] != null && r['geometry']['coordinates'] is List) {
+              final coords = r['geometry']['coordinates'] as List;
+              final path = coords.map<LatLng>((c) {
+                final lng = (c[0] as num).toDouble();
+                final lat = (c[1] as num).toDouble();
+                return LatLng(lat, lng);
+              }).toList();
+              if (path.length >= 2) {
+                roadPaths.add(path);
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('SafeRouteService: OSRM fetch error: $e');
+    }
+
+    // 2. Jika rute alternatif dari OSRM kurang dari 3, ambil rute tambahan via waypoint alternatif yang otomatis disnap ke jalan terdekat
+    if (roadPaths.length < 3) {
+      final midLat = (start.latitude + destination.latitude) / 2.0;
+      final midLng = (start.longitude + destination.longitude) / 2.0;
+      final dLat = destination.latitude - start.latitude;
+      final dLng = destination.longitude - start.longitude;
+
+      final offsetLat1 = -dLng * 0.30;
+      final offsetLng1 = dLat * 0.30;
+
+      final waypoints = [
+        LatLng(midLat + offsetLat1, midLng + offsetLng1),
+        LatLng(midLat - offsetLat1, midLng - offsetLng1),
+      ];
+
+      for (var wp in waypoints) {
+        if (roadPaths.length >= 3) break;
+        try {
+          final viaUrl = Uri.parse(
+            'https://router.project-osrm.org/route/v1/driving/'
+            '${start.longitude},${start.latitude};${wp.longitude},${wp.latitude};${destination.longitude},${destination.latitude}'
+            '?overview=full&geometries=geojson',
+          );
+          final res = await http.get(viaUrl).timeout(const Duration(seconds: 4));
+          if (res.statusCode == 200) {
+            final data = jsonDecode(res.body);
+            if (data['code'] == 'Ok' && data['routes'] is List && (data['routes'] as List).isNotEmpty) {
+              final r = data['routes'][0];
+              if (r['geometry'] != null && r['geometry']['coordinates'] is List) {
+                final coords = r['geometry']['coordinates'] as List;
+                final path = coords.map<LatLng>((c) {
+                  final lng = (c[0] as num).toDouble();
+                  final lat = (c[1] as num).toDouble();
+                  return LatLng(lat, lng);
+                }).toList();
+                if (path.length >= 2) {
+                  roadPaths.add(path);
+                }
+              }
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    return roadPaths;
+  }
+
+  /// Menghasilkan variasi rute yang mengikuti jalan nyata dari Start ke Destination dan mengukur skor keamanan masing-masing
+  Future<List<SafeRouteOption>> calculateSafeRoutes({
     required LatLng start,
     required LatLng destination,
     List<GisMarker>? incidentMarkers,
     List<RedZone>? redZones,
-  }) {
+  }) async {
     final markers = incidentMarkers ?? [];
     final zones = redZones ?? AppDatabase.redZones.map((z) => RedZone.fromJson(z)).toList();
-    
     final hazardPoints = markers.map((m) => LatLng(m.latitude, m.longitude)).toList();
 
-    // 1. Rute Langsung / Direct Route
-    final directPath = [
-      start,
-      destination,
-    ];
+    // 1. Ambil rute jalan nyata via OSRM
+    List<List<LatLng>> roadPaths = await _fetchRoadRoutes(start, destination);
 
-    // 2. Rute Memutar Barat / Utara (Bypass West/North)
-    final midLat1 = (start.latitude + destination.latitude) / 2.0 - 0.0050;
-    final midLng1 = (start.longitude + destination.longitude) / 2.0 - 0.0060;
-    final bypassPathWest = [
-      start,
-      LatLng((start.latitude + midLat1) / 2, start.longitude - 0.0040),
-      LatLng(midLat1, midLng1),
-      LatLng((destination.latitude + midLat1) / 2, destination.longitude - 0.0030),
-      destination,
-    ];
+    // 2. Fallback jika offline atau gagal koneksi: interpolasi bertahap
+    if (roadPaths.isEmpty) {
+      final midLat1 = (start.latitude + destination.latitude) / 2.0 - 0.0040;
+      final midLng1 = (start.longitude + destination.longitude) / 2.0 - 0.0050;
+      final midLat2 = (start.latitude + destination.latitude) / 2.0 + 0.0040;
+      final midLng2 = (start.longitude + destination.longitude) / 2.0 + 0.0050;
 
-    // 3. Rute Memutar Timur / Selatan (Bypass East/South)
-    final midLat2 = (start.latitude + destination.latitude) / 2.0 + 0.0050;
-    final midLng2 = (start.longitude + destination.longitude) / 2.0 + 0.0060;
-    final bypassPathEast = [
-      start,
-      LatLng((start.latitude + midLat2) / 2, start.longitude + 0.0040),
-      LatLng(midLat2, midLng2),
-      LatLng((destination.latitude + midLat2) / 2, destination.longitude + 0.0030),
-      destination,
-    ];
+      roadPaths = [
+        [
+          start,
+          LatLng((start.latitude + midLat1) / 2, start.longitude - 0.0020),
+          LatLng(midLat1, midLng1),
+          LatLng((destination.latitude + midLat1) / 2, destination.longitude - 0.0020),
+          destination,
+        ],
+        [
+          start,
+          LatLng((start.latitude + midLat2) / 2, start.longitude + 0.0020),
+          LatLng(midLat2, midLng2),
+          LatLng((destination.latitude + midLat2) / 2, destination.longitude + 0.0020),
+          destination,
+        ],
+        [start, destination],
+      ];
+    }
 
-    // Hitung Keamanan untuk ketiga rute
-    final score1 = calculateSafetyScore(directPath, hazardPoints, zones);
-    final score2 = calculateSafetyScore(bypassPathWest, hazardPoints, zones);
-    final score3 = calculateSafetyScore(bypassPathEast, hazardPoints, zones);
+    // 3. Analisis skor keamanan Haversine untuk tiap rute jalan
+    final analyzedRoutes = <Map<String, dynamic>>[];
+    for (int i = 0; i < roadPaths.length; i++) {
+      final path = roadPaths[i];
+      final analysis = calculateSafetyScore(path, hazardPoints, zones);
+      analyzedRoutes.add({
+        'index': i,
+        'path': path,
+        'analysis': analysis,
+      });
+    }
 
-    final rawRoutes = [
-      {
-        'rawName': 'Rute Memutar Barat (Jalur Aman)',
-        'path': bypassPathWest,
-        'analysis': score2,
-      },
-      {
-        'rawName': 'Rute Memutar Timur (Jalur Alternatif)',
-        'path': bypassPathEast,
-        'analysis': score3,
-      },
-      {
-        'rawName': 'Rute Pintas Langsung',
-        'path': directPath,
-        'analysis': score1,
-      },
-    ];
+    // Urutkan rute dari skor keamanan tertinggi ke terendah
+    analyzedRoutes.sort((a, b) {
+      final scoreA = (a['analysis'] as Map<String, dynamic>)['score'] as int;
+      final scoreB = (b['analysis'] as Map<String, dynamic>)['score'] as int;
+      return scoreB.compareTo(scoreA);
+    });
 
-    // Buat opsi rute
-    final options = rawRoutes.map((item) {
+    // 4. Konversi ke SafeRouteOption dengan penamaan yang informatif
+    final List<SafeRouteOption> options = [];
+    for (int i = 0; i < analyzedRoutes.length; i++) {
+      final item = analyzedRoutes[i];
       final analysis = item['analysis'] as Map<String, dynamic>;
       final path = item['path'] as List<LatLng>;
       final distKm = calculatePathDistanceKm(path);
-      final estMins = (distKm * 2.5).round().clamp(2, 60);
+      // Perkiraan waktu: kecepatan rata-rata dalam kota ~25 km/jam
+      final estMins = ((distKm / 25.0) * 60).round().clamp(2, 90);
 
       final score = analysis['score'] as int;
       final label = analysis['label'] as String;
       final color = analysis['color'] as Color;
       final minDist = analysis['minDistance'] as double;
 
-      String desc;
-      if (label == 'Aman') {
-        desc = 'Jalur rekomendasi aman. Bebas dari titik kerawanan begal & kecelakaan (jarak terdekat bahaya: ${minDist.toInt()}m).';
-      } else if (label == 'Rawan') {
-        desc = 'Jalur melintasi daerah pengawasan (jarak titik rawan: ${minDist.toInt()}m). Tetap waspada.';
+      String name;
+      if (i == 0) {
+        name = 'Rute Utama (Jalur Teraman)';
+      } else if (i == 1) {
+        name = 'Rute Alternatif 1';
       } else {
-        desc = 'Jalur tercepat namun melintasi langsung zona merah & titik rawan kejahatan (${minDist.toInt()}m).';
+        name = 'Rute Alternatif 2';
       }
 
-      return SafeRouteOption(
-        name: item['rawName'] as String,
-        safetyScore: score,
-        safetyLabel: label,
-        color: color,
-        distanceKm: distKm,
-        estimatedMinutes: estMins,
-        path: path,
-        description: desc,
-        minDistanceToHazardMeters: minDist,
-      );
-    }).toList();
+      String desc;
+      if (label == 'Aman') {
+        desc = 'Jalur jalan rekomendasi teraman. Menghindari zona rawan dan titik kejahatan (jarak terdekat: ${minDist.toInt()}m).';
+      } else if (label == 'Rawan') {
+        desc = 'Jalur jalan alternatif melintasi daerah pengawasan (jarak titik rawan: ${minDist.toInt()}m). Tetap waspada.';
+      } else {
+        desc = 'Jalur jalan melintasi dekat titik rawan kejahatan (${minDist.toInt()}m). Prioritaskan jalur aman.';
+      }
 
-    // Urutkan rute dari skor keamanan tertinggi ke terendah
-    options.sort((a, b) => b.safetyScore.compareTo(a.safetyScore));
+      options.add(
+        SafeRouteOption(
+          name: name,
+          safetyScore: score,
+          safetyLabel: label,
+          color: color,
+          distanceKm: distKm,
+          estimatedMinutes: estMins,
+          path: path,
+          description: desc,
+          minDistanceToHazardMeters: minDist,
+        ),
+      );
+    }
 
     return options;
   }
