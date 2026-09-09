@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../models/gis_marker.dart';
+import '../../models/red_zone.dart';
 import '../../services/api_service.dart';
 import '../../services/geofence_service.dart';
 import '../../widgets/desktop_frame.dart';
+import '../../widgets/safety_tips_bottom_sheet.dart';
 
 class StreetMapsView extends StatefulWidget {
   final String? initialFilter; // 'Crime' or 'Accident' or null
@@ -25,6 +28,7 @@ class _StreetMapsViewState extends State<StreetMapsView> {
   String _searchQuery = "";
   List<GisMarker> _markers = [];
   bool _isLoading = true;
+  StreamSubscription<RedZone>? _zoneEnteredSub;
 
   @override
   void initState() {
@@ -37,10 +41,18 @@ class _StreetMapsViewState extends State<StreetMapsView> {
       _filterAccident = true;
     }
     _loadMarkers();
+
+    // Listen for geofence entry events to display in-app safety tips bottom sheet
+    _zoneEnteredSub = GeofenceService().onZoneEntered.listen((zone) {
+      if (mounted) {
+        SafetyTipsBottomSheet.show(context, zone);
+      }
+    });
   }
 
   @override
   void dispose() {
+    _zoneEnteredSub?.cancel();
     _searchController.dispose();
     _mapController.dispose();
     super.dispose();
@@ -129,6 +141,40 @@ class _StreetMapsViewState extends State<StreetMapsView> {
                         color: const Color(0xFFEF4444).withOpacity(0.22),
                         borderColor: const Color(0xFFDC2626),
                         borderStrokeWidth: 2.0,
+                      );
+                    }).toList(),
+                  ),
+                  // Geofence Red Zones Interactive Centroid Markers
+                  MarkerLayer(
+                    markers: GeofenceService().redZones.map((zone) {
+                      return Marker(
+                        point: LatLng(zone.latitude, zone.longitude),
+                        width: 38,
+                        height: 38,
+                        child: GestureDetector(
+                          onTap: () {
+                            SafetyTipsBottomSheet.show(context, zone);
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEF4444),
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFFEF4444).withOpacity(0.55),
+                                  blurRadius: 8,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                            child: const Icon(
+                              Icons.warning_amber_rounded,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                        ),
                       );
                     }).toList(),
                   ),
@@ -517,7 +563,7 @@ class _StreetMapsViewState extends State<StreetMapsView> {
                               SizedBox(width: 10),
                               Expanded(
                                 child: Text(
-                                  'Simulasi: Pengguna memasuki Zona Merah (Notifikasi dikirim!)',
+                                  'Simulasi: Masuk Zona Merah (Notifikasi & Saran Pencegahan Aktif!)',
                                   style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                                 ),
                               ),

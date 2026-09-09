@@ -10,7 +10,7 @@ import '../database/app_database.dart';
 
 class ApiService {
   static const String baseUrl =
-      'https://web-safezone-production.up.railway.app/api';
+      'https://consist-familiar-calendar-generating.trycloudflare.com/api';
   static String? _token;
   static Map<String, dynamic>? currentUser;
 
@@ -289,7 +289,7 @@ class ApiService {
     return null;
   }
 
-  static Future<bool> submitSosWithEvent(dynamic event) async {
+  static Future<Map<String, dynamic>?> submitSosWithEvent(dynamic event) async {
     try {
       final response = await postRequest('/sos', {
         'sos_id': event.sosId,
@@ -301,10 +301,14 @@ class ApiService {
       });
       // 200 or 201 indicates success (including idempotent successful retries)
       if (response.statusCode == 201 || response.statusCode == 200) {
-        return true;
+        try {
+          return jsonDecode(response.body) as Map<String, dynamic>;
+        } catch (_) {
+          return {'success': true};
+        }
       }
     } catch (_) {}
-    return false;
+    return null;
   }
 
   static Future<List<CctvData>> fetchCctvs() async {

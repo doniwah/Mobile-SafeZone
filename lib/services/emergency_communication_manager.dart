@@ -30,12 +30,12 @@ class EmergencyCommunicationManager {
     return sosEvent;
   }
 
-  Future<void> sendEmergency(SosEvent event, NetworkReachability reachability, NetworkType networkType) async {
+  Future<Map<String, dynamic>?> sendEmergency(SosEvent event, NetworkReachability reachability, NetworkType networkType) async {
     event.status = SosStatus.pendingSync;
     await _repository.saveSosEvent(event);
 
     if (reachability == NetworkReachability.reachable) {
-      await _attemptOnlineSync(event);
+      return await _attemptOnlineSync(event);
     } else {
       // Offline fallback
       if (networkType == NetworkType.cellular || networkType == NetworkType.unknown) {
@@ -43,19 +43,21 @@ class EmergencyCommunicationManager {
         await _attemptSmsFallback(event);
       }
       // Else: remain pending sync
+      return null;
     }
   }
 
-  Future<void> _attemptOnlineSync(SosEvent event) async {
+  Future<Map<String, dynamic>?> _attemptOnlineSync(SosEvent event) async {
     event.status = SosStatus.syncing;
     event.retryCount += 1;
     await _repository.saveSosEvent(event);
 
     try {
-      final success = await ApiService.submitSosWithEvent(event);
-      if (success) {
+      final responseData = await ApiService.submitSosWithEvent(event);
+      if (responseData != null) {
         event.status = SosStatus.synced;
         await _repository.saveSosEvent(event);
+        return responseData;
       } else {
         event.status = SosStatus.failedRetry;
         await _repository.saveSosEvent(event);
@@ -67,6 +69,7 @@ class EmergencyCommunicationManager {
       event.status = SosStatus.pendingSync;
       await _repository.saveSosEvent(event);
     }
+    return null;
   }
 
   Future<void> _attemptSmsFallback(SosEvent event) async {

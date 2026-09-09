@@ -58,10 +58,19 @@ class _SosViewState extends State<SosView> with SingleTickerProviderStateMixin {
       final loc = await _getCurrentLocation();
       final lat = loc['latitude']!;
       final lng = loc['longitude']!;
-      final isYogya = (lat >= -8.1 && lat <= -7.5 && lng >= 110.0 && lng <= 110.6);
+      String addr;
+      if (lat >= -5.4 && lat <= -4.9 && lng >= 119.2 && lng <= 119.6) {
+        addr = 'Makassar, Sulawesi Selatan';
+      } else if (lat >= -8.1 && lat <= -7.5 && lng >= 110.0 && lng <= 110.6) {
+        addr = 'Yogyakarta, Indonesia';
+      } else if (lat >= -8.3 && lat <= -8.0 && lng >= 113.0 && lng <= 113.4) {
+        addr = 'Lumajang, Jawa Timur';
+      } else {
+        addr = 'Koordinat (${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)})';
+      }
       if (mounted) {
         setState(() {
-          _currentAddress = isYogya ? 'Yogyakarta, Indonesia' : 'Jl. Panjaitan #12';
+          _currentAddress = addr;
         });
       }
     } catch (_) {}
@@ -73,19 +82,19 @@ class _SosViewState extends State<SosView> with SingleTickerProviderStateMixin {
 
     serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      return {'latitude': -7.7956, 'longitude': 110.3695, 'accuracy': 0.0};
+      return {'latitude': -5.1477, 'longitude': 119.4327, 'accuracy': 0.0};
     }
 
     permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        return {'latitude': -7.7956, 'longitude': 110.3695, 'accuracy': 0.0};
+        return {'latitude': -5.1477, 'longitude': 119.4327, 'accuracy': 0.0};
       }
     }
     
     if (permission == LocationPermission.deniedForever) {
-      return {'latitude': -7.7956, 'longitude': 110.3695, 'accuracy': 0.0};
+      return {'latitude': -5.1477, 'longitude': 119.4327, 'accuracy': 0.0};
     } 
 
     try {
@@ -95,7 +104,11 @@ class _SosViewState extends State<SosView> with SingleTickerProviderStateMixin {
       );
       return {'latitude': position.latitude, 'longitude': position.longitude, 'accuracy': position.accuracy};
     } catch (_) {
-      return {'latitude': -7.7956, 'longitude': 110.3695, 'accuracy': 0.0};
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null) {
+        return {'latitude': lastKnown.latitude, 'longitude': lastKnown.longitude, 'accuracy': lastKnown.accuracy};
+      }
+      return {'latitude': -5.1477, 'longitude': 119.4327, 'accuracy': 0.0};
     }
   }
 
@@ -123,8 +136,6 @@ class _SosViewState extends State<SosView> with SingleTickerProviderStateMixin {
         });
 
         // Countdown finished. Wait for parallel operations to complete.
-        // If GPS is not done, it will wait here (up to 5s internal limit).
-        // If GPS failed, it returns fallback location.
         final loc = await locationFuture;
         final reachability = await reachabilityFuture;
         final networkType = await networkTypeFuture;
@@ -136,8 +147,16 @@ class _SosViewState extends State<SosView> with SingleTickerProviderStateMixin {
         // Perbarui lokasi user di SosNearbyService agar akurat
         SosNearbyService().updateLocation(lat, lng);
 
-        final isYogya = (lat >= -8.1 && lat <= -7.5 && lng >= 110.0 && lng <= 110.6);
-        final String address = isYogya ? 'Yogyakarta, Indonesia' : 'Lumajang, Jawa Timur';
+        String address;
+        if (lat >= -5.4 && lat <= -4.9 && lng >= 119.2 && lng <= 119.6) {
+          address = 'Makassar, Sulawesi Selatan';
+        } else if (lat >= -8.1 && lat <= -7.5 && lng >= 110.0 && lng <= 110.6) {
+          address = 'Yogyakarta, Indonesia';
+        } else if (lat >= -8.3 && lat <= -8.0 && lng >= 113.0 && lng <= 113.4) {
+          address = 'Lumajang, Jawa Timur';
+        } else {
+          address = 'Koordinat (${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)})';
+        }
 
         final manager = EmergencyCommunicationManager();
         final sosEvent = manager.createLocalSosEvent(
@@ -149,7 +168,28 @@ class _SosViewState extends State<SosView> with SingleTickerProviderStateMixin {
         );
 
         // Emergency Router: Decide best channel and save locally FIRST
-        await manager.sendEmergency(sosEvent, reachability, networkType);
+        final apiResponse = await manager.sendEmergency(sosEvent, reachability, networkType);
+
+        Map<String, dynamic> sosPayload = {
+          'success': true,
+          'message': 'SOS Event Created',
+          'emergency_report': {
+            'latitude': lat,
+            'longitude': lng,
+            'alamat_terdeteksi': address,
+          },
+        };
+
+        if (apiResponse != null) {
+          sosPayload.addAll(apiResponse);
+          if (sosPayload['emergency_report'] is Map) {
+            final er = Map<String, dynamic>.from(sosPayload['emergency_report']);
+            er['latitude'] ??= lat;
+            er['longitude'] ??= lng;
+            er['alamat_terdeteksi'] ??= address;
+            sosPayload['emergency_report'] = er;
+          }
+        }
 
         AppDatabase.sosHistory.insert(
           0,
@@ -163,8 +203,7 @@ class _SosViewState extends State<SosView> with SingleTickerProviderStateMixin {
         if (mounted) {
           Navigator.of(context).push(
             MaterialPageRoute(
-              // Using existing API response format or map format for UI
-              builder: (context) => EmergencyMapView(sosData: {'success': true, 'message': 'SOS Event Created'}),
+              builder: (context) => EmergencyMapView(sosData: sosPayload),
             ),
           );
         }

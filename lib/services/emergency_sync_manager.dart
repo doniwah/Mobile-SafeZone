@@ -59,8 +59,8 @@ class EmergencySyncManager {
           event.retryCount += 1;
           await _repository.saveSosEvent(event);
 
-          final success = await ApiService.submitSosWithEvent(event);
-          if (success) {
+          final responseData = await ApiService.submitSosWithEvent(event);
+          if (responseData != null) {
             event.status = SosStatus.synced;
             await _repository.saveSosEvent(event);
           } else {

@@ -34,17 +34,40 @@ class NotificationService {
         ?.requestNotificationsPermission();
   }
 
-  Future<void> showGeofenceAlert(String title, String body) async {
-    // Menggunakan channel baru 'geofence_danger_channel' agar custom sound terdaftar.
-    // (Android tidak mengizinkan perubahan sound pada channel yang sudah ada)
+  Future<bool> requestPermissions() async {
+    final android = flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    final granted = await android?.requestNotificationsPermission();
+    return granted ?? false;
+  }
+
+  Future<void> showGeofenceAlert(
+    String title,
+    String body, {
+    String? category,
+    List<String>? tips,
+  }) async {
+    BigTextStyleInformation? bigTextStyleInformation;
+    if (tips != null && tips.isNotEmpty) {
+      final tipsFormatted = tips.take(4).map((t) => '• $t').join('\n');
+      final bigText = '$body\n\n💡 SARAN PENCEGAHAN:\n$tipsFormatted';
+      bigTextStyleInformation = BigTextStyleInformation(
+        bigText,
+        htmlFormatBigText: false,
+        contentTitle: title,
+        htmlFormatContentTitle: false,
+        summaryText: category != null ? '⚠️ $category' : '💡 Tips Pencegahan Aktif',
+        htmlFormatSummaryText: false,
+      );
+    }
+
     final AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
-      'geofence_danger_channel',
+      'geofence_danger_channel_v2',
       'Geofence Danger Alerts',
       channelDescription: 'Notifikasi peringatan saat memasuki zona rawan',
       importance: Importance.max,
       priority: Priority.high,
       playSound: true,
-      sound: const RawResourceAndroidNotificationSound('danger_alert'),
       enableVibration: true,
       vibrationPattern: Int64List.fromList([0, 500, 200, 500, 200, 500]),
       enableLights: true,
@@ -52,11 +75,11 @@ class NotificationService {
       ledColor: const Color(0xFFEF4444),
       ledOnMs: 300,
       ledOffMs: 300,
+      styleInformation: bigTextStyleInformation,
     );
 
     const DarwinNotificationDetails iOSPlatformChannelSpecifics = DarwinNotificationDetails(
       presentSound: true,
-      sound: 'danger_alert.mp3', // Custom sound untuk iOS
       presentAlert: true,
       presentBadge: true,
     );
@@ -69,7 +92,9 @@ class NotificationService {
     await flutterLocalNotificationsPlugin.show(
       id: 0, // Notification ID
       title: title,
-      body: body,
+      body: tips != null && tips.isNotEmpty
+          ? '$body (Tarik ke bawah untuk saran pencegahan)'
+          : body,
       notificationDetails: platformChannelSpecifics,
     );
   }
@@ -91,7 +116,7 @@ class NotificationService {
       presentBadge: true,
     );
 
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
+    final NotificationDetails platformChannelSpecifics = NotificationDetails(
       android: androidPlatformChannelSpecifics,
       iOS: iOSPlatformChannelSpecifics,
     );
@@ -105,15 +130,13 @@ class NotificationService {
   }
 
   Future<void> showSafeZoneAlert(String title, String body) async {
-    // Channel baru 'safezone_safe_channel' dengan custom sound berbeda (lebih tenang)
     final AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
-      'safezone_safe_channel',
+      'safezone_safe_channel_v2',
       'SafeZone Safe Alerts',
       channelDescription: 'Notifikasi saat keluar dari zona rawan ke zona aman',
       importance: Importance.high,
       priority: Priority.high,
       playSound: true,
-      sound: const RawResourceAndroidNotificationSound('safe_zone_alert'),
       enableVibration: true,
       vibrationPattern: Int64List.fromList([0, 400, 200, 400]),
       enableLights: true,
@@ -125,7 +148,6 @@ class NotificationService {
 
     const DarwinNotificationDetails iOSPlatformChannelSpecifics = DarwinNotificationDetails(
       presentSound: true,
-      sound: 'safe_zone_alert.mp3', // Custom sound untuk iOS
       presentAlert: true,
       presentBadge: true,
     );

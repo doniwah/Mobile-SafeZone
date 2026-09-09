@@ -1,7 +1,10 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../widgets/desktop_frame.dart';
+import '../../services/geofence_service.dart';
+import '../../services/notification_service.dart';
 import 'home_view_content.dart';
 import '../reports/reports_view.dart';
 import '../sos/sos_view.dart';
@@ -26,6 +29,25 @@ class _HomeViewState extends State<HomeView> {
   void initState() {
     super.initState();
     _initWidgetChannel();
+    _initGeofenceAndPermissions();
+  }
+
+  void _initGeofenceAndPermissions() async {
+    // 1. Ensure notification permission is requested after UI is mounted
+    await NotificationService().requestPermissions();
+
+    // 2. Request location permission if not already granted
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    // 3. Start Geofence tracking and do an immediate location check
+    if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
+      GeofenceService().startTracking();
+      await GeofenceService().refreshZones();
+      await GeofenceService().checkCurrentLocation();
+    }
   }
 
   void _initWidgetChannel() {

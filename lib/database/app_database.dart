@@ -68,6 +68,14 @@ class AppDatabase {
       'latitude': -8.1725,
       'longitude': 113.6983,
       'radius': 300.0,
+      'category': 'Rawan Begal & Penodongan',
+      'danger_level': 'Sangat Tinggi',
+      'prevention_tips': [
+        'Hindari melintas sendirian di atas pukul 21.00 WIB.',
+        'Tetap melaju di lajur utama berlampu terang dan jangan menepi di tempat sepi.',
+        'Simpan tas berharga di dalam bagasi jok motor, bukan disandang di bahu.',
+        'Siagakan tombol SOS atau aktifkan fitur Safe Route untuk rute alternatif.',
+      ],
     },
     {
       'id': '2',
@@ -75,6 +83,15 @@ class AppDatabase {
       'latitude': -8.1331,
       'longitude': 113.2224,
       'radius': 500.0,
+      'category': 'Rawan Jambret & Curanmor',
+      'danger_level': 'Tinggi',
+      'prevention_tips': [
+        'Posisikan tas ransel/selempang di bagian dada saat berjalan kaki.',
+        'Gunakan kunci ganda/pengaman tambahan saat memarkir kendaraan motor.',
+        'Waspadai pengendara motor mencurigakan yang memperlambat laju di dekat Anda.',
+        'Jangan bermain smartphone di pinggir jalan raya tanpa pengawasan.',
+      ],
     },
   ];
 }
+

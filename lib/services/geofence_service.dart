@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import '../models/red_zone.dart';
 import '../database/app_database.dart';
@@ -13,11 +14,15 @@ class GeofenceService {
   GeofenceService._internal();
 
   StreamSubscription<Position>? _positionStreamSubscription;
+  Timer? _refreshTimer;
   List<RedZone> _redZones = [];
   final Set<String> _zonesInside = {}; // Track zones currently inside to avoid spamming notifications
 
   final _geofenceStreamController = StreamController<String>.broadcast();
   Stream<String> get onGeofenceAlert => _geofenceStreamController.stream;
+
+  final _zoneEnteredController = StreamController<RedZone>.broadcast();
+  Stream<RedZone> get onZoneEntered => _zoneEnteredController.stream;
 
   List<RedZone> get redZones => List.unmodifiable(_redZones);
   Set<String> get zonesInside => Set.unmodifiable(_zonesInside);
@@ -25,21 +30,131 @@ class GeofenceService {
   Future<void> initialize() async {
     await _fetchRedZones();
     _startLocationTracking();
+
+    // Re-fetch red zones periodically every 5 minutes to keep up-to-date with backend changes
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+      _fetchRedZones();
+    });
+  }
+
+  Future<void> refreshZones() async {
+    await _fetchRedZones();
   }
 
   Future<void> _fetchRedZones() async {
+    List<RedZone> loadedZones = [];
+
+    // 1. Try public /map/statistics endpoint (Always accessible without auth token, contains full Makassar polygon zones)
     try {
-      final response = await ApiService.getRequest('/zones'); // Assuming this endpoint exists
+      final response = await ApiService.getRequest('/map/statistics');
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is List) {
+          for (var item in decoded) {
+            if (item is Map) {
+              final name = (item['nama_lokasi'] ?? '').toString();
+              // Ignore safe zones
+              if (name.toLowerCase().contains('safe zone') || name.toLowerCase().contains('zona aman')) {
+                continue;
+              }
+              final reports = item['reports'] as List? ?? [];
+              final totalLaporan = (item['total_laporan'] as num?)?.toInt() ?? reports.length;
+
+              String dangerLevel = 'Tinggi';
+              String category = 'Zona Rawan Kejahatan';
+              if (reports.isNotEmpty) {
+                final firstCat = reports[0]['kategori']?['nama_kategori'] ?? reports[0]['judul_laporan'];
+                if (firstCat != null) category = firstCat.toString();
+                dangerLevel = totalLaporan > 1 ? 'Sangat Tinggi' : 'Tinggi';
+              } else if (name.toLowerCase().contains('rawan')) {
+                dangerLevel = 'Tinggi';
+              }
+
+              final zoneMap = <String, dynamic>{
+                'id': item['id']?.toString() ?? name,
+                'name': name,
+                'polygon_geojson': item['polygon_geojson'],
+                'category': category,
+                'danger_level': dangerLevel,
+              };
+
+              if (reports.isNotEmpty && reports[0]['latitude'] != null) {
+                zoneMap['latitude'] = reports[0]['latitude'];
+                zoneMap['longitude'] = reports[0]['longitude'];
+              }
+
+              final zone = RedZone.fromJson(zoneMap);
+              loadedZones.add(zone);
+            }
+          }
+          if (loadedZones.isNotEmpty) {
+            debugPrint('GeofenceService: Berhasil memuat ${loadedZones.length} zona dari /map/statistics');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('GeofenceService: Error /map/statistics: $e');
+    }
+
+    // 2. Try dedicated /zones endpoint
+    try {
+      final response = await ApiService.getRequest('/zones');
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final list = (data is Map && data.containsKey('data')) ? data['data'] as List : data as List;
-        _redZones = list.map((json) => RedZone.fromJson(json)).toList();
-        return;
+        final zones = list.map((json) => RedZone.fromJson(json)).toList();
+        for (var z in zones) {
+          if (!loadedZones.any((lz) => lz.id == z.id || lz.name == z.name)) {
+            loadedZones.add(z);
+          }
+        }
       }
     } catch (_) {}
 
-    // Fallback to mock data if API fails or is unreachable
-    _redZones = AppDatabase.redZones.map((json) => RedZone.fromJson(json)).toList();
+    // 3. Try /home endpoint
+    try {
+      final response = await ApiService.getRequest('/home');
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is Map && data.containsKey('locations')) {
+          final locs = data['locations'] as List;
+          final filtered = locs.where((loc) {
+            final st = (loc['status_kerawanan'] ?? '').toString().toLowerCase();
+            return st.contains('rawan') || st.contains('bahaya') || st.contains('tidak aman');
+          }).map((json) => RedZone.fromJson(json)).toList();
+
+          for (var z in filtered) {
+            if (!loadedZones.any((lz) => lz.id == z.id || lz.name == z.name)) {
+              loadedZones.add(z);
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    if (loadedZones.isNotEmpty) {
+      _redZones = loadedZones;
+      debugPrint('GeofenceService: Total zona aktif: ${_redZones.length}');
+    } else if (_redZones.isEmpty) {
+      _redZones = AppDatabase.redZones.map((json) => RedZone.fromJson(json)).toList();
+      debugPrint('GeofenceService: Menggunakan ${_redZones.length} zona mock bawaan');
+    }
+  }
+
+  void startTracking() {
+    _startLocationTracking();
+  }
+
+  Future<void> checkCurrentLocation() async {
+    try {
+      Position? pos = await Geolocator.getLastKnownPosition();
+      pos ??= await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 5),
+      );
+      checkCoordinates(pos.latitude, pos.longitude);
+    } catch (_) {}
   }
 
   void _startLocationTracking() async {
@@ -53,6 +168,20 @@ class GeofenceService {
     }
     if (permission == LocationPermission.deniedForever) return;
 
+    // Immediate check on startup using last known or current position
+    try {
+      final lastPos = await Geolocator.getLastKnownPosition();
+      if (lastPos != null) {
+        _checkGeofences(lastPos);
+      }
+      final currentPos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 4),
+      );
+      _checkGeofences(currentPos);
+    } catch (_) {}
+
+    _positionStreamSubscription?.cancel();
     _positionStreamSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
@@ -65,14 +194,9 @@ class GeofenceService {
 
   void checkCoordinates(double latitude, double longitude) {
     for (var zone in _redZones) {
-      final distance = Geolocator.distanceBetween(
-        latitude,
-        longitude,
-        zone.latitude,
-        zone.longitude,
-      );
+      final bool isInside = zone.containsPoint(latitude, longitude);
 
-      if (distance <= zone.radius) {
+      if (isInside) {
         if (!_zonesInside.contains(zone.id)) {
           // Entered zone
           _zonesInside.add(zone.id);
@@ -93,11 +217,17 @@ class GeofenceService {
   }
 
   void _triggerGeofenceAlert(RedZone zone) {
-    final title = 'PERINGATAN ZONA MERAH!';
-    final body = 'Anda telah memasuki daerah berbahaya: ${zone.name}. Harap waspada.';
+    final title = 'PERINGATAN ZONA MERAH: ${zone.name}';
+    final body = 'Anda memasuki kawasan ${zone.category} (${zone.dangerLevel}). Harap waspada dan ikuti panduan keselamatan.';
     
-    NotificationService().showGeofenceAlert(title, body);
+    NotificationService().showGeofenceAlert(
+      title,
+      body,
+      category: zone.category,
+      tips: zone.effectivePreventionTips,
+    );
     _geofenceStreamController.add('MASUK ZONA MERAH: ${zone.name}');
+    _zoneEnteredController.add(zone);
   }
 
   void _triggerSafeZoneExitAlert(RedZone zone) {
@@ -116,6 +246,8 @@ class GeofenceService {
       latitude: -8.1725,
       longitude: 113.6983,
       radius: 300.0,
+      category: 'Rawan Begal & Penodongan',
+      dangerLevel: 'Sangat Tinggi',
     ));
 
     _zonesInside.add(zone.id);
@@ -130,6 +262,8 @@ class GeofenceService {
       latitude: -8.1725,
       longitude: 113.6983,
       radius: 300.0,
+      category: 'Rawan Begal & Penodongan',
+      dangerLevel: 'Sangat Tinggi',
     ));
 
     _zonesInside.remove(zone.id);
@@ -137,7 +271,9 @@ class GeofenceService {
   }
 
   void dispose() {
+    _refreshTimer?.cancel();
     _positionStreamSubscription?.cancel();
     _geofenceStreamController.close();
+    _zoneEnteredController.close();
   }
 }

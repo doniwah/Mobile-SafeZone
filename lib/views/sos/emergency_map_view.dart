@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../widgets/desktop_frame.dart';
 
 class EmergencyMapView extends StatefulWidget {
@@ -23,9 +24,8 @@ class _EmergencyMapViewState extends State<EmergencyMapView> {
   String _getEta(double km) {
     if (km < 1) return "1 Mnt";
     if (km > 100) {
-      final hours = (km / 80).floor();
-      final mins = ((km % 80) / 80 * 60).round();
-      return hours > 0 ? "$hours Jam $mins Mnt" : "$mins Mnt";
+      final hours = (km / 60).round();
+      return "$hours Jam";
     }
     final mins = (km * 1.5).round();
     return "$mins Mnt";
@@ -33,17 +33,71 @@ class _EmergencyMapViewState extends State<EmergencyMapView> {
 
   @override
   Widget build(BuildContext context) {
-    // Extract coordinates from sosData
-    final double userLat = (widget.sosData?['emergency_report']?['latitude'] as num?)?.toDouble() ?? -8.1331;
-    final double userLng = (widget.sosData?['emergency_report']?['longitude'] as num?)?.toDouble() ?? 113.2224;
+    // Extract report and polsek data flexibly from sosData
+    Map<String, dynamic>? report;
+    if (widget.sosData != null) {
+      if (widget.sosData!['emergency_report'] is Map) {
+        report = Map<String, dynamic>.from(widget.sosData!['emergency_report'] as Map);
+      } else if (widget.sosData!['data'] is Map) {
+        final d = widget.sosData!['data'] as Map;
+        if (d['emergency_report'] is Map) {
+          report = Map<String, dynamic>.from(d['emergency_report'] as Map);
+        } else {
+          report = Map<String, dynamic>.from(d);
+        }
+      } else {
+        report = widget.sosData;
+      }
+    }
 
-    final String polsekName = widget.sosData?['emergency_report']?['nearest_polsek']?['nama'] ?? 'Polsek Lumajang Kota';
-    final double polsekLat = (widget.sosData?['emergency_report']?['nearest_polsek']?['lokasi']?['latitude'] as num?)?.toDouble() ?? -8.1331;
-    final double polsekLng = (widget.sosData?['emergency_report']?['nearest_polsek']?['lokasi']?['longitude'] as num?)?.toDouble() ?? 113.2224;
-    
-    final double distanceKm = (widget.sosData?['emergency_report']?['jarak_polsek_km'] as num?)?.toDouble() ?? 1.2;
-    final String polsekPhone = widget.sosData?['emergency_report']?['nearest_polsek']?['nomor_telepon'] ?? '0334-881001';
-    final String alamatTerdeteksi = widget.sosData?['emergency_report']?['alamat_terdeteksi'] ?? 'Lokasi Terdeteksi';
+    final double userLat = (report?['latitude'] as num?)?.toDouble() ??
+        (widget.sosData?['latitude'] as num?)?.toDouble() ??
+        -5.1477;
+    final double userLng = (report?['longitude'] as num?)?.toDouble() ??
+        (widget.sosData?['longitude'] as num?)?.toDouble() ??
+        119.4327;
+
+    // Nearest polsek extraction
+    Map<String, dynamic>? polsekMap;
+    if (report?['nearest_polsek'] is Map) {
+      polsekMap = Map<String, dynamic>.from(report!['nearest_polsek'] as Map);
+    } else if (report?['polsek'] is Map) {
+      polsekMap = Map<String, dynamic>.from(report!['polsek'] as Map);
+    } else if (widget.sosData?['nearest_polsek'] is Map) {
+      polsekMap = Map<String, dynamic>.from(widget.sosData!['nearest_polsek'] as Map);
+    }
+
+    final String polsekName = polsekMap?['nama'] ?? polsekMap?['name'] ?? 'Polsek Terdekat';
+
+    // Polsek Lat & Lng
+    double polsekLat = userLat;
+    double polsekLng = userLng;
+    if (polsekMap?['lokasi'] is Map) {
+      final loc = polsekMap!['lokasi'] as Map;
+      if (loc['latitude'] != null) polsekLat = (loc['latitude'] as num).toDouble();
+      if (loc['longitude'] != null) polsekLng = (loc['longitude'] as num).toDouble();
+    } else {
+      if (polsekMap?['latitude'] != null) polsekLat = (polsekMap!['latitude'] as num).toDouble();
+      if (polsekMap?['longitude'] != null) polsekLng = (polsekMap!['longitude'] as num).toDouble();
+    }
+
+    // Distance in KM: use reported distance or compute via Geolocator
+    double distanceKm;
+    if (report?['jarak_polsek_km'] != null) {
+      distanceKm = (report!['jarak_polsek_km'] as num).toDouble();
+    } else if (polsekLat != userLat || polsekLng != userLng) {
+      distanceKm = Geolocator.distanceBetween(userLat, userLng, polsekLat, polsekLng) / 1000.0;
+    } else {
+      distanceKm = 1.2;
+    }
+
+    final String polsekPhone = polsekMap?['nomor_telepon'] ??
+        polsekMap?['phone'] ??
+        polsekMap?['telepon'] ??
+        '110';
+    final String alamatTerdeteksi = report?['alamat_terdeteksi'] ??
+        widget.sosData?['alamat_terdeteksi'] ??
+        'Lokasi Terdeteksi';
 
     final userPoint = LatLng(userLat, userLng);
     final polsekPoint = LatLng(polsekLat, polsekLng);
@@ -265,7 +319,7 @@ class _EmergencyMapViewState extends State<EmergencyMapView> {
                           const SizedBox(height: 2),
                           Text(
                             distanceKm > 100 
-                              ? 'Sinyal terkirim di Yogyakarta. Polsek Lumajang merespons jarak jauh.'
+                              ? 'Sinyal terkirim. $polsekName siap siaga merespons.'
                               : 'Sinyal koordinat terkirim. $polsekName sedang merespons.', 
                             style: const TextStyle(fontSize: 11, color: Color(0xFF7F1D1D), fontWeight: FontWeight.w500),
                           ),

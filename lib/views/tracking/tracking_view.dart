@@ -2,11 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../models/gis_marker.dart';
 import '../../services/api_service.dart';
 import '../../services/geofence_service.dart';
 import '../../services/safe_route_service.dart';
 import '../../services/geo_corridor_service.dart';
+import '../../widgets/safety_tips_bottom_sheet.dart';
 
 class TrackingView extends StatefulWidget {
   const TrackingView({super.key});
@@ -37,8 +39,15 @@ class _TrackingViewState extends State<TrackingView> {
   List<GisMarker> _incidentMarkers = [];
   bool _showStartSuggestions = false;
   bool _showDestSuggestions = false;
+  bool _isFetchingGps = false;
 
-  LumajangLocation _startLocation = SafeRouteService.lumajangLocations[0]; // Alun-Alun
+  // Default start location is Lokasi Saat Ini (GPS Realtime)
+  LumajangLocation _startLocation = LumajangLocation(
+    id: 'current_location',
+    name: 'Lokasi Saat Ini',
+    location: const LatLng(-8.1331, 113.2224),
+    address: 'Menghubungkan ke GPS perangkat...',
+  );
   LumajangLocation? _destinationLocation;
 
   SafeRouteOption? _selectedRoute;
@@ -52,8 +61,9 @@ class _TrackingViewState extends State<TrackingView> {
   @override
   void initState() {
     super.initState();
-    _startController.text = _startLocation.name;
+    _startController.text = 'Lokasi Saat Ini';
     _loadIncidentMarkers();
+    _fetchCurrentLocation();
 
     // Listen to Geo-Corridor route deviation alerts
     _corridorSubscription = GeoCorridorService().onCorridorAlert.listen((event) {
@@ -119,6 +129,104 @@ class _TrackingViewState extends State<TrackingView> {
 
     if (_destinationLocation != null) {
       _mapController.move(_destinationLocation!.location, 14.2);
+    }
+  }
+
+  Future<void> _fetchCurrentLocation({bool showFeedback = false}) async {
+    if (_isFetchingGps) return;
+    setState(() {
+      _isFetchingGps = true;
+    });
+
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (showFeedback && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              behavior: SnackBarBehavior.floating,
+              content: Text('Layanan lokasi (GPS) tidak aktif.'),
+            ),
+          );
+        }
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) return;
+      }
+      if (permission == LocationPermission.deniedForever) return;
+
+      Position? lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null && mounted && _startLocation.name == 'Lokasi Saat Ini') {
+        setState(() {
+          _startLocation = LumajangLocation(
+            id: 'current_location',
+            name: 'Lokasi Saat Ini',
+            location: LatLng(lastKnown.latitude, lastKnown.longitude),
+            address: 'GPS Akurasi Cepat',
+          );
+        });
+      }
+
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 6),
+      );
+
+      if (mounted) {
+        setState(() {
+          _startLocation = LumajangLocation(
+            id: 'current_location',
+            name: 'Lokasi Saat Ini',
+            location: LatLng(position.latitude, position.longitude),
+            address: 'GPS Presisi Tinggi',
+          );
+          _startController.text = 'Lokasi Saat Ini';
+          if (_destinationLocation != null) {
+            _recalculateRoutes();
+          }
+        });
+
+        if (showFeedback) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              behavior: SnackBarBehavior.floating,
+              backgroundColor: Color(0xFF10B981),
+              content: Text('Berhasil menggunakan Lokasi Saat Ini (GPS)'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isFetchingGps = false;
+        });
+      }
+    }
+  }
+
+  void _selectCurrentLocationAsStart() {
+    setState(() {
+      _startLocation = LumajangLocation(
+        id: 'current_location',
+        name: 'Lokasi Saat Ini',
+        location: _startLocation.name == 'Lokasi Saat Ini'
+            ? _startLocation.location
+            : const LatLng(-8.1331, 113.2224),
+        address: 'GPS Realtime Terkini',
+      );
+      _startController.text = 'Lokasi Saat Ini';
+      _showStartSuggestions = false;
+    });
+    _fetchCurrentLocation(showFeedback: true);
+    if (_destinationLocation != null) {
+      _recalculateRoutes();
     }
   }
 
@@ -628,6 +736,46 @@ class _TrackingViewState extends State<TrackingView> {
                               ),
                             ),
                           ),
+                          if (_startLocation.name == 'Lokasi Saat Ini')
+                            Container(
+                              margin: const EdgeInsets.only(right: 6),
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF10B981).withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _isFetchingGps
+                                      ? const SizedBox(
+                                          width: 10,
+                                          height: 10,
+                                          child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF10B981)),
+                                        )
+                                      : const Icon(Icons.gps_fixed_rounded, color: Color(0xFF10B981), size: 11),
+                                  const SizedBox(width: 4),
+                                  const Text(
+                                    'GPS AKTIF',
+                                    style: TextStyle(color: Color(0xFF059669), fontSize: 9.5, fontWeight: FontWeight.w800),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          GestureDetector(
+                            onTap: () => _selectCurrentLocationAsStart(),
+                            child: Tooltip(
+                              message: 'Gunakan Lokasi Saat Ini (GPS)',
+                              child: Padding(
+                                padding: const EdgeInsets.all(4.0),
+                                child: Icon(
+                                  Icons.my_location_rounded,
+                                  color: _startLocation.name == 'Lokasi Saat Ini' ? const Color(0xFF10B981) : const Color(0xFF64748B),
+                                  size: 18,
+                                ),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                       const Padding(
@@ -699,7 +847,7 @@ class _TrackingViewState extends State<TrackingView> {
                 if (_showStartSuggestions)
                   Container(
                     margin: const EdgeInsets.only(top: 8),
-                    constraints: const BoxConstraints(maxHeight: 200),
+                    constraints: const BoxConstraints(maxHeight: 230),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(16),
@@ -708,25 +856,58 @@ class _TrackingViewState extends State<TrackingView> {
                         BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10)
                       ],
                     ),
-                    child: ListView.builder(
+                    child: ListView(
                       shrinkWrap: true,
-                      itemCount: searchFilteredStart.length,
-                      itemBuilder: (context, index) {
-                        final loc = searchFilteredStart[index];
-                        return ListTile(
+                      padding: EdgeInsets.zero,
+                      children: [
+                        // Priority option: Lokasi Saat Ini (GPS)
+                        ListTile(
                           dense: true,
-                          leading: const Icon(Icons.my_location_rounded, color: Color(0xFF10B981), size: 16),
-                          title: Text(
-                            loc.name,
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                          tileColor: const Color(0xFFF0FDF4),
+                          leading: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF10B981),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.gps_fixed_rounded, color: Colors.white, size: 14),
+                          ),
+                          title: Row(
+                            children: const [
+                              Text(
+                                'Lokasi Saat Ini',
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF047857)),
+                              ),
+                              SizedBox(width: 6),
+                              Text(
+                                '(GPS DEFAULT)',
+                                style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Color(0xFF059669)),
+                              ),
+                            ],
                           ),
                           subtitle: Text(
-                            loc.address,
-                            style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                            _startLocation.address,
+                            style: const TextStyle(fontSize: 11, color: Color(0xFF065F46)),
                           ),
-                          onTap: () => _selectStartLocation(loc),
-                        );
-                      },
+                          onTap: () => _selectCurrentLocationAsStart(),
+                        ),
+                        const Divider(height: 1, color: Color(0xFFE2E8F0)),
+                        ...searchFilteredStart.map((loc) {
+                          return ListTile(
+                            dense: true,
+                            leading: const Icon(Icons.place_outlined, color: Color(0xFF64748B), size: 16),
+                            title: Text(
+                              loc.name,
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                            ),
+                            subtitle: Text(
+                              loc.address,
+                              style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                            ),
+                            onTap: () => _selectStartLocation(loc),
+                          );
+                        }).toList(),
+                      ],
                     ),
                   ),
 
@@ -803,6 +984,41 @@ class _TrackingViewState extends State<TrackingView> {
                               color: const Color(0xFFEF4444).withOpacity(0.18),
                               borderColor: const Color(0xFFEF4444),
                               borderStrokeWidth: 1.5,
+                            );
+                          }).toList(),
+                        ),
+
+                        // Red Zones interactive markers (Tapping opens Safety Tips)
+                        MarkerLayer(
+                          markers: GeofenceService().redZones.map((zone) {
+                            return Marker(
+                              point: LatLng(zone.latitude, zone.longitude),
+                              width: 34,
+                              height: 34,
+                              child: GestureDetector(
+                                onTap: () {
+                                  SafetyTipsBottomSheet.show(context, zone);
+                                },
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFEF4444),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: Colors.white, width: 1.5),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: const Color(0xFFEF4444).withOpacity(0.5),
+                                        blurRadius: 6,
+                                        spreadRadius: 1,
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Icon(
+                                    Icons.shield_rounded,
+                                    color: Colors.white,
+                                    size: 18,
+                                  ),
+                                ),
+                              ),
                             );
                           }).toList(),
                         ),
